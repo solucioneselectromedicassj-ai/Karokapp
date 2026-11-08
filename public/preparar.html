@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#1a0b2e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<title>Preparar canciones</title>
+<style>
+  :root { --bg:#1a0b2e; --card:#2a1450; --pink:#ff4fa3; --text:#fff; --muted:#b9a7d6; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,sans-serif; background:var(--bg); color:var(--text); padding:16px; max-width:720px; margin-inline:auto; }
+  h1 { margin:0 0 4px; font-size:1.5rem; } h2 { color:var(--pink); font-size:1.1rem; margin:22px 0 6px; }
+  textarea, select { width:100%; padding:12px; border-radius:12px; border:0; font-size:1rem; font-family:inherit; }
+  button { background:var(--pink); color:#fff; border:0; border-radius:12px; padding:12px 16px; font-size:1rem; font-weight:600; cursor:pointer; }
+  button.ghost { background:transparent; border:1px solid var(--muted); color:var(--muted); padding:6px 10px; font-size:.8rem; }
+  button:disabled { opacity:.6; }
+  .row { display:flex; gap:8px; margin-top:8px; } .row select { flex:1; }
+  .item { display:flex; gap:10px; align-items:center; background:var(--card); border-radius:12px; padding:10px 12px; margin:8px 0; }
+  .item .t { flex:1; min-width:0; font-size:.95rem; } .st { font-size:.8rem; color:var(--muted); display:block; }
+  .ok { color:#6ee7a0 } .err { color:#ff8b8b }
+  .hint { color:var(--muted); font-size:.85rem; } a { color:var(--pink); }
+  #msg { min-height:1.3em; margin-top:8px; font-size:.9rem; color:var(--muted); }
+</style>
+</head>
+<body>
+<h1>🛠️ Preparar canciones</h1>
+<p class="hint">Pega enlaces de YouTube (uno por línea). Se descarga el audio a la carpeta <code>songs/</code>, se quita la voz y se escribe la letra. Hazlo <b>antes</b> de la fiesta. <a href="/">← Volver a elegir canciones</a></p>
+
+<textarea id="urls" rows="5" placeholder="https://www.youtube.com/watch?v=...&#10;https://youtu.be/..."></textarea>
+<div class="row">
+  <select id="lang"><option value="auto">Idioma: automático</option><option value="es">Español</option><option value="en">Inglés</option>
+    <option value="pt">Portugués</option><option value="ko">Coreano</option></select>
+  <button id="go">Preparar karaoke</button>
+</div>
+<div id="msg"></div>
+<p class="hint">Consejo: usa el enlace de la <b>canción original</b> (con voz). Para eso se quita la voz y se escribe la letra. Si pegas un video que ya es karaoke, también sirve, pero no hace falta convertirlo: puedes buscarlo directo en la pantalla principal.</p>
+
+<h2 id="count">Biblioteca</h2>
+<div id="lib"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const STAGES = { starting:'Iniciando…', separating:'Quitando la voz…', transcribing:'Escribiendo la letra…', done:'Terminando…' };
+function status(s) {
+  if (s.status === 'ready') return '<span class="st ok">✅ Lista para la fiesta</span>';
+  if (s.status === 'error') return `<span class="st err">⚠️ ${esc(s.error || 'Error')}</span>`;
+  if (s.status === 'downloading') return '<span class="st">⬇️ Descargando de YouTube…</span>';
+  if (s.status === 'processing') return `<span class="st">⏳ ${STAGES[s.stage] || 'Procesando…'}</span>`;
+  return '<span class="st">🕒 En espera</span>';
+}
+$('go').onclick = async () => {
+  const urls = $('urls').value.split(/\s+/).filter(Boolean);
+  if (!urls.length) { $('msg').textContent = 'Pega al menos un enlace.'; return; }
+  $('go').disabled = true; $('msg').textContent = 'Añadiendo…';
+  try {
+    const r = await fetch('/api/import', { method:'POST', body: JSON.stringify({ urls, lang: $('lang').value }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    const bad = d.filter(x => x.error).length, dup = d.filter(x => x.duplicate).length;
+    $('msg').textContent = `✅ ${d.length - bad - dup} añadidas` + (dup ? ` · ${dup} ya estaban` : '') + (bad ? ` · ${bad} enlaces no válidos` : '');
+    $('urls').value = '';
+  } catch (e) { $('msg').textContent = '⚠️ ' + e.message; }
+  $('go').disabled = false;
+};
+$('lib').onclick = async e => {
+  const b = e.target.closest('button[data-a]');
+  if (!b) return;
+  if (b.dataset.a === 'delete' && !confirm('¿Borrar esta canción de la biblioteca?')) return;
+  const r = await fetch('/api/library/' + b.dataset.a, { method:'POST', body: JSON.stringify({ lid: b.dataset.lid }) });
+  if (!r.ok) $('msg').textContent = '⚠️ ' + ((await r.json()).error || 'Error');
+};
+const es = new EventSource('/events');
+es.onmessage = e => {
+  const lib = JSON.parse(e.data).library;
+  $('count').textContent = `Biblioteca · ${lib.filter(s => s.status === 'ready').length} listas de ${lib.length}`;
+  $('lib').innerHTML = lib.length ? lib.map(s => `
+    <div class="item"><div class="t">🎵 ${esc(s.title)}${status(s)}</div>
+      ${s.status === 'error' ? `<button class="ghost" data-a="retry" data-lid="${s.lid}">Reintentar</button>` : ''}
+      <button class="ghost" data-a="delete" data-lid="${s.lid}">Borrar</button></div>`).join('')
+    : '<p class="hint">Aún no hay canciones.</p>';
+};
+</script>
+</body>
+</html>

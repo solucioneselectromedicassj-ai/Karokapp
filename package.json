@@ -1,0 +1,7 @@
+{
+  "name": "karaoke-party",
+  "version": "1.0.0",
+  "description": "Karaoke para fiestas: las niñas eligen canciones desde el teléfono y suenan en la TV",
+  "scripts": { "start": "node server.js" },
+  "license": "MIT"
+}

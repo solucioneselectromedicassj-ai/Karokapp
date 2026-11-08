@@ -1,0 +1,4 @@
+demucs
+faster-whisper
+yt-dlp
+# Demucs usa PyTorch; si pip no lo instala solo: pip install torch torchaudio
