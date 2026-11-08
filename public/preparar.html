@@ -6,7 +6,8 @@
 <meta name="theme-color" content="#1a0b2e">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>Agregar canciones</title>
 <style>
   :root { --bg:#1a0b2e; --card:#2a1450; --pink:#ff4fa3; --text:#fff; --muted:#b9a7d6; }
@@ -124,5 +125,6 @@ es.onmessage = e => {
     : '<p class="hint">Aún no hay canciones.</p>';
 };
 </script>
+<script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});</script>
 </body>
 </html>

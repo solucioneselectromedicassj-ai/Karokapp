@@ -19,6 +19,14 @@ se escribe la letra y se genera un **video karaoke** (letra que se pinta palabra
 3. `pip install -r requirements.txt` (la 1ª vez descarga modelos de IA, 1–3 GB: hazlo con buen internet y con tiempo).
 4. `node server.js` → muestra las direcciones. Abre la principal en el teléfono (mismo Wi-Fi) y toca "Añadir a la pantalla de inicio" para que se vea como app.
 
+## Instalarla como app en el teléfono
+La app se sirve por Wi-Fi local (`http://IP:3000`). Los navegadores solo ofrecen "Instalar app" con HTTPS, así que:
+- **iPhone (Safari):** Compartir → **Añadir a pantalla de inicio**. Funciona sin HTTPS y se abre como app, con el icono.
+- **Android (Chrome), prueba rápida:** abre `chrome://flags/#unsafely-treat-insecure-origin-as-secure`, activa la opción, escribe `http://IP-DE-LA-LAPTOP:3000`,
+  reinicia Chrome y luego menú ⋮ → **Instalar app**. (Sin esto, "Añadir a pantalla de inicio" crea solo un acceso directo con el icono.)
+- **Cualquiera, con HTTPS real:** un túnel como `cloudflared tunnel --url http://localhost:3000` da una dirección `https://…` temporal que sí se instala normal.
+- Iconos en `public/`: `icon.svg`, `icon-192.png`, `icon-512.png`, `icon-maskable-512.png` (Android), `apple-touch-icon.png` (iPhone).
+
 ## Antes de la fiesta: armar las carpetas
 En **➕ Agregar canciones** (desde laptop o teléfono):
 1. Escribe el nombre de la **carpeta** (ej. "Cumple de Lissa") y el idioma.
