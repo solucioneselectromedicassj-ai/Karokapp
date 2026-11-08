@@ -30,7 +30,8 @@ function state() {
     ? { ...it, status: library.get(it.lid)?.status || 'error', stage: library.get(it.lid)?.stage || '' }
     : it);
   const cur = queue.find(playable);
-  return { queue: q, current: cur ? cur.qid : null, library: [...library.values()].reverse() };
+  const folders = [...new Set([...library.values()].map(x => x.folder || 'General'))].sort((a, b) => a.localeCompare(b));
+  return { queue: q, current: cur ? cur.qid : null, library: [...library.values()].reverse(), folders };
 }
 const broadcast = () => {
   const data = `data: ${JSON.stringify(state())}\n\n`;
@@ -136,7 +137,7 @@ function runNext() {
   const convert = () => {
     s.status = 'processing'; s.stage = 'starting'; broadcast();
     let errTail = '';
-    const child = spawn(PYTHON, [path.join(__dirname, 'process.py'), path.join(SONGS, lid), s.lang || 'auto']);
+    const child = spawn(PYTHON, [path.join(__dirname, 'process.py'), path.join(SONGS, lid), s.lang || 'auto', s.title || '']);
     child.stdout.on('data', d => {
       const m = String(d).match(/STAGE (\w+)/g);
       if (m) { s.stage = m[m.length - 1].slice(6); broadcast(); }
@@ -144,7 +145,7 @@ function runNext() {
     child.stderr.on('data', d => { errTail = (errTail + d).slice(-600); });
     child.on('error', e => finish(false, `No se pudo ejecutar ${PYTHON}: ${e.message}`));
     child.on('close', code => {
-      const ok = code === 0 && fs.existsSync(path.join(SONGS, lid, 'instrumental.mp3'));
+      const ok = code === 0 && fs.existsSync(path.join(SONGS, lid, 'karaoke.mp4'));
       finish(ok, lastLine(errTail) || `Falló (código ${code})`);
     });
   };
@@ -155,17 +156,18 @@ function runNext() {
 }
 
 // Crea una entrada (sin archivo aún) y la pone en la cola de trabajo
-function addSong({ title, lang, yt }) {
+const cleanFolder = f => String(f || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 40) || 'General';
+function addSong({ title, lang, yt, folder }) {
   const lid = 's' + crypto.randomBytes(5).toString('hex');
   fs.mkdirSync(path.join(SONGS, lid));
-  const s = { lid, title: String(title).slice(0, 120), lang: LANGS.includes(lang) ? lang : 'auto', yt: yt || '', status: 'queued', stage: '', error: '' };
+  const s = { lid, title: String(title).slice(0, 120), lang: LANGS.includes(lang) ? lang : 'auto', yt: yt || '', folder: cleanFolder(folder), status: 'queued', stage: '', error: '' };
   library.set(lid, s); saveMeta(s); jobs.push(lid);
   return s;
 }
 const LANGS = ['es', 'en', 'pt', 'fr', 'it', 'ko', 'auto'];
 
 // Importa enlaces de YouTube: descarga + convierte a karaoke
-async function importLinks(urls, lang) {
+async function importLinks(urls, lang, folder) {
   const out = [];
   for (const raw of urls.slice(0, 30)) {
     const m = String(raw).match(YT_URL);
@@ -173,7 +175,7 @@ async function importLinks(urls, lang) {
     const dup = [...library.values()].find(x => x.yt === m[1] && x.status !== 'error');
     if (dup) { out.push({ url: raw, lid: dup.lid, title: dup.title, duplicate: true }); continue; }
     const info = (await fromLink(m[1]))[0];
-    const s = addSong({ title: info.title, lang, yt: m[1] });
+    const s = addSong({ title: info.title, lang, yt: m[1], folder });
     out.push({ url: raw, lid: s.lid, title: s.title });
   }
   broadcast(); runNext();
@@ -184,7 +186,8 @@ function loadLibrary() {
   for (const lid of fs.readdirSync(SONGS)) {
     try {
       const s = JSON.parse(fs.readFileSync(path.join(SONGS, lid, 'meta.json'), 'utf8'));
-      const ok = fs.existsSync(path.join(SONGS, lid, 'instrumental.mp3'));
+      const ok = fs.existsSync(path.join(SONGS, lid, 'karaoke.mp4'));
+      s.folder = s.folder || 'General';
       const wasError = s.status === 'error';
       s.status = ok ? 'ready' : wasError ? 'error' : 'queued'; s.stage = '';
       library.set(lid, s);
@@ -202,7 +205,7 @@ const readBody = req => new Promise(resolve => {
 });
 const json = (res, code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
-               '.mp3': 'audio/mpeg', '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml' };
+               '.mp3': 'audio/mpeg', '.mp4': 'video/mp4', '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml' };
 
 function sendFile(req, res, full) {
   fs.stat(full, (err, st) => {
@@ -227,7 +230,7 @@ function handleUpload(req, res, url) {
   const ext = path.extname(name).toLowerCase();
   if (!AUDIO_EXT.has(ext)) return json(res, 400, { error: 'Formato no soportado (usa mp3, wav, m4a, flac, ogg…)' });
   if (+req.headers['content-length'] > MAX_UPLOAD) return json(res, 413, { error: 'Archivo muy grande (máx. 150 MB)' });
-  const s = addSong({ title: path.basename(name, ext).replace(/[_]+/g, ' '), lang: url.searchParams.get('lang') });
+  const s = addSong({ title: path.basename(name, ext).replace(/[_]+/g, ' '), lang: url.searchParams.get('lang'), folder: url.searchParams.get('folder') });
   jobs.splice(jobs.indexOf(s.lid), 1);            // aún no hay archivo: se encola al terminar la subida
   const dir = path.join(SONGS, s.lid);
   const out = fs.createWriteStream(path.join(dir, 'original' + ext));
@@ -272,13 +275,30 @@ const server = http.createServer(async (req, res) => {
     const b = await readBody(req);
     const urls = (Array.isArray(b.urls) ? b.urls : String(b.urls || '').split(/\s+/)).filter(Boolean);
     if (!urls.length) return json(res, 400, { error: 'Pega al menos un enlace' });
-    return json(res, 200, await importLinks(urls, b.lang));
+    return json(res, 200, await importLinks(urls, b.lang, b.folder));
   }
   if (req.method === 'POST' && p === '/api/library/retry') {
     const s = library.get((await readBody(req)).lid);
     if (!s || s.status !== 'error') return json(res, 400, { error: 'No se puede reintentar' });
     s.status = 'queued'; s.error = ''; saveMeta(s); jobs.push(s.lid); broadcast(); runNext();
     return json(res, 200, s);
+  }
+  if (req.method === 'POST' && p === '/api/library/move') {
+    const b = await readBody(req);
+    const s = library.get(b.lid);
+    if (!s) return json(res, 404, { error: 'No encontrada' });
+    s.folder = cleanFolder(b.folder); saveMeta(s); broadcast();
+    return json(res, 200, s);
+  }
+  // Pone en la fila todas las canciones de una carpeta (opcionalmente en orden aleatorio)
+  if (req.method === 'POST' && p === '/api/queue-folder') {
+    const b = await readBody(req);
+    let songs = [...library.values()].filter(x => (b.folder === '*' || x.folder === b.folder) && x.status !== 'error');
+    if (b.shuffle) for (let i = songs.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [songs[i], songs[j]] = [songs[j], songs[i]]; }
+    const singer = String(b.singer || 'Fiesta').slice(0, 30);
+    songs.forEach(x => queue.push({ qid: nextQid++, kind: 'local', lid: x.lid, title: x.title, thumb: '', singer }));
+    broadcast();
+    return json(res, 200, { added: songs.length });
   }
   if (req.method === 'POST' && p === '/api/library/delete') {
     const s = library.get((await readBody(req)).lid);
@@ -320,7 +340,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   // Archivos de canciones propias
-  const mm = p.match(/^\/media\/(s[0-9a-f]{10})\/(instrumental\.mp3|vocals\.mp3|lyrics\.json)$/);
+  const mm = p.match(/^\/media\/(s[0-9a-f]{10})\/(karaoke\.mp4|instrumental\.mp3|lyrics\.json)$/);
   if (mm) return sendFile(req, res, path.join(SONGS, mm[1], mm[2]));
 
   // Estáticos

@@ -15,155 +15,141 @@
   * { box-sizing:border-box; }
   body { margin:0; font-family:system-ui,sans-serif; background:var(--bg); color:var(--text); padding:16px; max-width:640px; margin-inline:auto; }
   h1 { margin:0 0 12px; font-size:1.6rem; }
+  h2 { font-size:1.1rem; margin:22px 0 6px; color:var(--pink); }
   input { width:100%; padding:14px; border-radius:12px; border:0; font-size:1rem; margin-bottom:8px; }
-  .row { display:flex; gap:8px; }
-  .row input { margin:0; }
-  button { background:var(--pink); color:#fff; border:0; border-radius:12px; padding:12px 16px; font-size:1rem; font-weight:600; cursor:pointer; }
+  .row { display:flex; gap:8px; } .row input { margin:0; }
+  button, .btn { background:var(--pink); color:#fff; border:0; border-radius:12px; padding:12px 16px; font-size:1rem; font-weight:600; cursor:pointer; text-decoration:none; display:inline-block; text-align:center; }
   button.ghost { background:transparent; border:1px solid var(--muted); color:var(--muted); padding:8px 12px; font-size:.85rem; }
+  button.sec, .btn.sec { background:var(--card); }
+  button:disabled { opacity:.6; }
   .chips { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0; }
   .chip { background:var(--card); color:var(--text); font-weight:400; padding:8px 12px; border-radius:999px; font-size:.9rem; }
+  .chip.on { background:var(--pink); font-weight:700; }
   .item { display:flex; gap:10px; align-items:center; background:var(--card); border-radius:12px; padding:8px; margin:8px 0; }
   .item img { width:96px; height:54px; object-fit:cover; border-radius:8px; flex:none; }
   .item .t { flex:1; font-size:.9rem; line-height:1.2; min-width:0; }
-  .item .t small { color:var(--muted); display:block; }
-  h2 { font-size:1.1rem; margin:20px 0 4px; color:var(--pink); }
+  .item .t small, .st { color:var(--muted); display:block; font-size:.8rem; }
+  .st.ok { color:#6ee7a0; } .st.err { color:#ff8b8b; }
   .now { border:2px solid var(--pink); }
   #msg { color:var(--muted); font-size:.9rem; margin:6px 0; min-height:1.2em; }
   .hint { color:var(--muted); font-size:.85rem; }
-  .up { background:var(--card); border-radius:12px; padding:12px; margin-top:8px; }
-  .up select { padding:10px; border-radius:10px; border:0; font-size:.95rem; }
-  .st { font-size:.8rem; color:var(--muted); display:block; }
-  .st.ok { color:#6ee7a0; } .st.err { color:#ff8b8b; }
-  button:disabled { opacity:.6; }
+  .nav { display:flex; gap:8px; flex-wrap:wrap; margin:10px 0; } .nav .btn { flex:1; font-size:.9rem; padding:10px; }
 </style>
 </head>
 <body>
 <h1>🎤 Karaoke Party</h1>
 <input id="name" placeholder="Tu nombre" maxlength="30">
-<div class="row">
-  <input id="q" placeholder="Busca una canción o pega un enlace de YouTube…" enterkeyhint="search">
-  <button id="go">Buscar</button>
+<div class="nav">
+  <a class="btn" href="/preparar">➕ Agregar canciones</a>
+  <a class="btn sec" href="/tv" target="_blank">📺 Pantalla de karaoke aquí</a>
 </div>
-<div class="chips" id="chips"></div>
-<div id="msg"></div>
-<div id="results"></div>
 
-<h2>Mis canciones (subir mp3)</h2>
-<div class="up">
-  <input id="file" type="file" accept="audio/*,.mp3,.m4a,.wav,.flac,.ogg">
-  <div class="row" style="margin-top:8px">
-    <select id="lang"><option value="auto">Idioma: automático</option><option value="es">Español</option><option value="en">Inglés</option>
-      <option value="pt">Portugués</option><option value="ko">Coreano</option></select>
-    <button id="upbtn">Subir y convertir</button>
-  </div>
-  <p class="hint" id="upmsg">Se quita la voz y se escribe la letra. Tarda unos minutos por canción; mientras tanto puedes añadirla a la fila.</p>
+<h2>Carpetas y canciones</h2>
+<div class="chips" id="folders"></div>
+<div class="row" id="folderActions" style="display:none">
+  <button id="playFolder">▶ Reproducir carpeta</button>
+  <button id="shuffleFolder" class="sec">🔀 Aleatorio</button>
 </div>
 <div id="library"></div>
 
 <h2>En la fila</h2>
 <div id="queue"></div>
-<p class="hint"><a href="/preparar" style="color:var(--pink)">🛠️ Preparar canciones desde YouTube (descargar + quitar voz + letra)</a></p>
-<p class="hint">Se añade “karaoke” a la búsqueda para encontrar la pista con letra. También puedes pegar un enlace de YouTube.</p>
+
+<h2>Buscar en YouTube</h2>
+<div class="row">
+  <input id="q" placeholder="Busca una canción o pega un enlace…" enterkeyhint="search">
+  <button id="go">Buscar</button>
+</div>
+<div class="chips" id="chips"></div>
+<div id="msg"></div>
+<div id="results"></div>
+<p class="hint">Reproduce karaokes de YouTube directo (necesita internet). Para tener las canciones listas sin internet, usa “Agregar canciones”.</p>
 
 <script>
 const $ = id => document.getElementById(id);
-const SUGGEST = ['Frozen', 'Encanto', 'Moana', 'Taylor Swift', 'Disney', 'KPop Demon Hunters', 'Shakira', 'Ariana Grande'];
-const nameEl = $('name');
-try { nameEl.value = localStorage.getItem('kname') || ''; } catch {}
-nameEl.oninput = () => { try { localStorage.setItem('kname', nameEl.value); } catch {} };
-
-$('chips').innerHTML = SUGGEST.map(s => `<button class="chip">${s}</button>`).join('');
-$('chips').onclick = e => { if (e.target.classList.contains('chip')) { $('q').value = e.target.textContent; doSearch(); } };
-$('go').onclick = doSearch;
-$('q').onkeydown = e => { if (e.key === 'Enter') doSearch(); };
-
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
-let found = [];
+const get = k => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
+const put = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+const post = (url, body) => fetch(url, { method:'POST', body: JSON.stringify(body) });
+const nameEl = $('name'); nameEl.value = get('kname'); nameEl.oninput = () => put('kname', nameEl.value);
+const singer = () => nameEl.value.trim() || 'Alguien';
 
-async function doSearch() {
-  const q = $('q').value.trim();
-  if (!q) return;
-  $('msg').textContent = 'Buscando…';
-  $('results').innerHTML = '';
-  try {
-    const r = await fetch('/api/search?q=' + encodeURIComponent(q));
-    const data = await r.json();
-    if (data.error) throw new Error(data.error);
-    found = data;
-    $('msg').textContent = data.length ? '' : 'Sin resultados';
-    $('results').innerHTML = data.map((s, i) => `
-      <div class="item">
-        <img src="${esc(s.thumb)}" alt="">
-        <div class="t">${esc(s.title)}<small>${esc(s.channel)}</small></div>
-        <button data-i="${i}">Cantar</button>
-      </div>`).join('');
-  } catch (e) { $('msg').textContent = '⚠️ ' + e.message; }
-}
+let data = { queue: [], current: null, library: [], folders: [] };
+let folder = get('kfolder') || '*';      // '*' = todas
 
-$('results').onclick = async e => {
-  const b = e.target.closest('button[data-i]');
-  if (!b) return;
-  const s = found[b.dataset.i];
-  const singer = nameEl.value.trim() || 'Alguien';
-  b.disabled = true; b.textContent = '✓ Añadida';
-  await fetch('/api/queue', { method:'POST', body: JSON.stringify({ id:s.id, title:s.title, thumb:s.thumb, singer }) });
-};
-
-$('queue').onclick = async e => {
-  const b = e.target.closest('button[data-rm]');
-  if (b && confirm('¿Quitar esta canción de la fila?'))
-    fetch('/api/remove', { method:'POST', body: JSON.stringify({ qid: +b.dataset.rm }) });
-};
-
-// ----- Subir canción propia -----
-$('upbtn').onclick = async () => {
-  const f = $('file').files[0];
-  if (!f) { $('upmsg').textContent = 'Elige primero un archivo de audio.'; return; }
-  $('upbtn').disabled = true; $('upmsg').textContent = 'Subiendo… ⏫';
-  try {
-    const r = await fetch(`/api/upload?name=${encodeURIComponent(f.name)}&lang=${$('lang').value}`, { method:'POST', body: f });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || 'Error al subir');
-    $('upmsg').textContent = '✅ Subida. Se está convirtiendo; ya puedes tocar “Cantar”.';
-    $('file').value = '';
-  } catch (e) { $('upmsg').textContent = '⚠️ ' + e.message; }
-  $('upbtn').disabled = false;
-};
-$('library').onclick = async e => {
-  const b = e.target.closest('button[data-lid]');
-  if (!b) return;
-  const singer = nameEl.value.trim() || 'Alguien';
-  b.disabled = true; setTimeout(() => b.disabled = false, 1500);
-  await fetch('/api/queue', { method:'POST', body: JSON.stringify({ lid: b.dataset.lid, singer }) });
-};
-
-const STAGES = { starting:'Iniciando…', separating:'Quitando la voz…', transcribing:'Escribiendo la letra…', done:'Terminando…' };
+// ---------- Carpetas y biblioteca ----------
+const STAGES = { starting:'Iniciando…', separating:'Quitando la voz…', transcribing:'Escribiendo la letra…', rendering:'Creando el video…', done:'Terminando…' };
 function status(s) {
   if (s.status === 'ready') return '<span class="st ok">✅ Lista</span>';
-  if (s.status === 'error') return `<span class="st err">⚠️ Error: ${esc(s.error || '')}</span>`;
+  if (s.status === 'error') return `<span class="st err">⚠️ ${esc(s.error || 'Error')}</span>`;
   if (s.status === 'downloading') return '<span class="st">⬇️ Descargando de YouTube…</span>';
   if (s.status === 'processing') return `<span class="st">⏳ ${STAGES[s.stage] || 'Procesando…'}</span>`;
-  return '<span class="st">🕒 En espera de procesar</span>';
+  return '<span class="st">🕒 En espera</span>';
 }
-function renderLibrary(lib) {
-  $('library').innerHTML = lib.map(s => `
-    <div class="item"><div class="t">🎵 ${esc(s.title)}${status(s)}</div>
-      <button data-lid="${s.lid}" ${s.status === 'error' ? 'disabled' : ''}>Cantar</button></div>`).join('');
+function renderLibrary() {
+  if (folder !== '*' && !data.folders.includes(folder)) folder = '*';
+  const count = f => data.library.filter(s => f === '*' || s.folder === f).length;
+  $('folders').innerHTML = ['*', ...data.folders].map(f =>
+    `<button class="chip ${f === folder ? 'on' : ''}" data-f="${esc(f)}">${f === '*' ? 'Todas' : '📁 ' + esc(f)} (${count(f)})</button>`).join('');
+  const list = data.library.filter(s => folder === '*' || s.folder === folder).slice().reverse();
+  $('folderActions').style.display = list.length ? 'flex' : 'none';
+  $('library').innerHTML = list.length ? list.map(s => `
+    <div class="item"><div class="t">🎵 ${esc(s.title)}${status(s)}${folder === '*' ? `<small>📁 ${esc(s.folder)}</small>` : ''}</div>
+      <button data-lid="${s.lid}" ${s.status === 'error' ? 'disabled' : ''}>Cantar</button></div>`).join('')
+    : '<p class="hint">Aún no hay canciones. Toca “➕ Agregar canciones”.</p>';
 }
-function renderQueue(q, cur) {
+$('folders').onclick = e => { const b = e.target.closest('button[data-f]'); if (b) { folder = b.dataset.f; put('kfolder', folder); renderLibrary(); } };
+$('library').onclick = e => {
+  const b = e.target.closest('button[data-lid]'); if (!b) return;
+  b.disabled = true; setTimeout(() => b.disabled = false, 1500);
+  post('/api/queue', { lid: b.dataset.lid, singer: singer() });
+};
+const playFolder = shuffle => post('/api/queue-folder', { folder, shuffle, singer: nameEl.value.trim() || 'Fiesta' });
+$('playFolder').onclick = () => playFolder(false);
+$('shuffleFolder').onclick = () => playFolder(true);
+
+// ---------- Fila ----------
+$('queue').onclick = e => {
+  const b = e.target.closest('button[data-rm]');
+  if (b && confirm('¿Quitar esta canción de la fila?')) post('/api/remove', { qid: +b.dataset.rm });
+};
+function renderQueue() {
+  const { queue: q, current: cur } = data;
   $('queue').innerHTML = q.length ? q.map((s, i) => {
     const wait = s.kind === 'local' && s.status !== 'ready';
     const label = s.qid === cur ? '▶️ Sonando · ' : wait ? (s.status === 'error' ? '⚠️ ' : '⏳ ') : (i + 1) + '. ';
     return `<div class="item ${s.qid === cur ? 'now' : ''}">
       ${s.thumb ? `<img src="${esc(s.thumb)}" alt="">` : '<div style="width:96px;text-align:center;font-size:2rem">🎵</div>'}
-      <div class="t">${label}<b>${esc(s.singer)}</b>
-        <small>${esc(s.title)}${wait ? ' — preparando…' : ''}</small></div>
-      <button class="ghost" data-rm="${s.qid}">Quitar</button>
-    </div>`;
-  }).join('') : '<p class="hint">Aún no hay canciones. ¡Elige la primera!</p>';
+      <div class="t">${label}<b>${esc(s.singer)}</b><small>${esc(s.title)}${wait ? ' — preparando…' : ''}</small></div>
+      <button class="ghost" data-rm="${s.qid}">Quitar</button></div>`;
+  }).join('') : '<p class="hint">La fila está vacía. Elige una canción o una carpeta.</p>';
 }
+
+// ---------- Búsqueda en YouTube ----------
+$('chips').innerHTML = ['Frozen', 'Encanto', 'Moana', 'Taylor Swift', 'Disney', 'Shakira'].map(s => `<button class="chip">${s}</button>`).join('');
+$('chips').onclick = e => { if (e.target.classList.contains('chip')) { $('q').value = e.target.textContent; doSearch(); } };
+$('go').onclick = doSearch;
+$('q').onkeydown = e => { if (e.key === 'Enter') doSearch(); };
+let found = [];
+async function doSearch() {
+  const q = $('q').value.trim(); if (!q) return;
+  $('msg').textContent = 'Buscando…'; $('results').innerHTML = '';
+  try {
+    const d = await (await fetch('/api/search?q=' + encodeURIComponent(q))).json();
+    if (d.error) throw new Error(d.error);
+    found = d; $('msg').textContent = d.length ? '' : 'Sin resultados';
+    $('results').innerHTML = d.map((s, i) => `<div class="item"><img src="${esc(s.thumb)}" alt="">
+      <div class="t">${esc(s.title)}<small>${esc(s.channel)}</small></div><button data-i="${i}">Cantar</button></div>`).join('');
+  } catch (e) { $('msg').textContent = '⚠️ ' + e.message; }
+}
+$('results').onclick = async e => {
+  const b = e.target.closest('button[data-i]'); if (!b) return;
+  const s = found[b.dataset.i]; b.disabled = true; b.textContent = '✓ Añadida';
+  post('/api/queue', { id: s.id, title: s.title, thumb: s.thumb, singer: singer() });
+};
+
 const es = new EventSource('/events');
-es.onmessage = e => { const d = JSON.parse(e.data); renderQueue(d.queue, d.current); renderLibrary(d.library); };
+es.onmessage = e => { data = JSON.parse(e.data); renderLibrary(); renderQueue(); };
 </script>
 </body>
 </html>

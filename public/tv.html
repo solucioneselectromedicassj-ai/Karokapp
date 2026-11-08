@@ -3,53 +3,45 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Karaoke Party - TV</title>
+<meta name="theme-color" content="#000000">
+<title>Karaoke Party - Pantalla</title>
 <style>
   html,body { margin:0; height:100%; background:#000; color:#fff; font-family:system-ui,sans-serif; overflow:hidden; }
-  #player { position:absolute; inset:0; width:100%; height:100%; }
-  .full { position:absolute; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center;
+  #player, #vid { position:absolute; inset:0; width:100%; height:100%; }
+  #vid { object-fit:contain; background:#000; display:none; }
+  #idle { position:absolute; inset:0; z-index:5; display:none; flex-direction:column; align-items:center; justify-content:center;
           background:linear-gradient(135deg,#1a0b2e,#5a1a6e); text-align:center; padding:4vw; }
-  #idle { z-index:5; } #lyr { z-index:5; }
-  #idle h1 { font-size:6vw; margin:0 0 2vw; }
-  #idle p { font-size:2.4vw; margin:.4em 0; color:#e0cfff; }
-  #start { position:absolute; inset:0; z-index:10; background:#1a0b2e; color:#fff; border:0; font-size:5vw; cursor:pointer; }
+  #idle h1 { font-size:max(6vw,28px); margin:0 0 2vw; }
+  #idle p { font-size:max(2.4vw,16px); margin:.4em 0; color:#e0cfff; }
+  #start { position:absolute; inset:0; z-index:10; background:#1a0b2e; color:#fff; border:0; font-size:max(5vw,24px); cursor:pointer; }
   #bar { position:absolute; left:0; right:0; bottom:0; z-index:8; background:rgba(0,0,0,.65); padding:.8vw 2vw;
-         font-size:1.8vw; display:flex; justify-content:space-between; opacity:0; transition:opacity .4s; }
+         font-size:max(1.8vw,13px); display:flex; justify-content:space-between; opacity:0; transition:opacity .4s; pointer-events:none; }
   #bar.show { opacity:1; }
   #toast { position:absolute; top:2vw; left:50%; transform:translateX(-50%); z-index:9; background:#ff4fa3; padding:1vw 2vw;
-           border-radius:2vw; font-size:2vw; display:none; }
-  #lyr .title { position:absolute; top:2vw; font-size:2vw; color:#e0cfff; }
-  #lyr .line { font-size:5.2vw; font-weight:700; line-height:1.25; margin:1.2vw 0; max-width:92vw; }
-  #lyr .line.next { font-size:3.2vw; color:#b9a7d6; font-weight:500; }
-  #lyr .w { color:#fff; opacity:.55; transition:color .1s, opacity .1s; }
-  #lyr .w.on { color:#ff4fa3; opacity:1; }
-  #lyr .w.done { opacity:1; }
+           border-radius:2vw; font-size:max(2vw,14px); display:none; max-width:90vw; text-align:center; }
+  #cast { position:absolute; top:12px; right:12px; z-index:9; display:none; background:rgba(0,0,0,.6); color:#fff; border:1px solid #ff4fa3;
+          border-radius:999px; padding:10px 16px; font-size:15px; cursor:pointer; }
 </style>
 </head>
 <body>
 <button id="start">▶ Toca para iniciar el karaoke</button>
 <div id="player"></div>
-<div id="idle" class="full">
+<video id="vid" playsinline></video>
+<div id="idle">
   <h1 id="idleTitle">🎤 ¡Elige tu canción!</h1>
   <p id="idleSub">Conéctate al mismo Wi-Fi y abre en tu teléfono:</p>
   <p><b id="addr"></b></p>
 </div>
-<div id="lyr" class="full">
-  <div class="title" id="ltitle"></div>
-  <div class="line" id="l1"></div>
-  <div class="line next" id="l2"></div>
-</div>
-<audio id="aud"></audio>
+<button id="cast">📡 Transmitir a la TV</button>
 <div id="bar"><span id="now"></span><span id="next"></span></div>
 <div id="toast"></div>
 
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
 const $ = id => document.getElementById(id);
-const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 $('addr').textContent = location.host;
-let player, ytReady = false, started = false, st = { queue: [], current: null }, playing = null, lyrics = [], raf = 0;
-const aud = $('aud');
+let player, ytReady = false, started = false, st = { queue: [], current: null }, playing = null;
+const vid = $('vid');
 
 function onYouTubeIframeAPIReady() {
   player = new YT.Player('player', {
@@ -69,55 +61,29 @@ function showBar(cur) {
   $('bar').classList.add('show'); setTimeout(() => $('bar').classList.remove('show'), 8000);
 }
 
-// ---------- Letra sincronizada ----------
-function renderLine(el, seg) {
-  el.innerHTML = seg ? (seg.words && seg.words.length
-    ? seg.words.map(w => `<span class="w" data-s="${w.start}" data-e="${w.end}">${esc(w.w)}</span>`).join(' ')
-    : `<span class="w done">${esc(seg.text)}</span>`) : '';
-}
-let lineIdx = -2;
-function tick() {
-  const t = aud.currentTime;
-  // línea actual: la última que ya empezó (con 0.3 s de adelanto)
-  let i = -1;
-  for (let k = 0; k < lyrics.length; k++) if (lyrics[k].start - 0.3 <= t) i = k; else break;
-  if (i !== lineIdx) { lineIdx = i; renderLine($('l1'), lyrics[i]); renderLine($('l2'), lyrics[i + 1]); }
-  document.querySelectorAll('#l1 .w').forEach(w => {
-    const s = +w.dataset.s, e = +w.dataset.e;
-    if (isNaN(s)) return;
-    w.classList.toggle('done', t >= e); w.classList.toggle('on', t >= s && t < e);
-  });
-  raf = requestAnimationFrame(tick);
-}
+// ---- Transmitir a la TV (Chromecast / AirPlay) ----
+const canCast = 'remote' in vid || typeof vid.webkitShowPlaybackTargetPicker === 'function';
+$('cast').onclick = () => {
+  if ('remote' in vid) vid.remote.prompt().catch(e => toast(e.name === 'NotFoundError' ? 'No encontré TVs. ¿Están en el mismo Wi-Fi?' : 'No se pudo transmitir'));
+  else vid.webkitShowPlaybackTargetPicker();
+};
 
 function stopAll() {
-  cancelAnimationFrame(raf); aud.pause();
+  vid.pause(); vid.removeAttribute('src'); vid.load();
   if (ytReady) try { player.stopVideo(); } catch {}
-}
-
-async function playLocal(cur) {
-  lyrics = []; lineIdx = -2;
-  $('ltitle').textContent = `🎤 ${cur.singer} — ${cur.title}`;
-  $('l1').textContent = ''; $('l2').textContent = '';
-  try { lyrics = await (await fetch(`/media/${cur.lid}/lyrics.json`)).json(); } catch {}
-  if (playing !== cur.qid) return;       // cambió mientras cargaba
-  if (!lyrics.length) $('l1').innerHTML = `<span class="w done">🎵 ${esc(cur.title)}</span>`;
-  aud.src = `/media/${cur.lid}/instrumental.mp3`;
-  aud.onended = next;
-  aud.onerror = () => { toast('No se pudo reproducir esa canción. Pasando a la siguiente…'); setTimeout(next, 1800); };
-  aud.play().catch(() => toast('Toca la pantalla para activar el sonido'));
-  raf = requestAnimationFrame(tick);
 }
 
 function sync() {
   if (!started) return;
   const cur = st.queue.find(s => s.qid === st.current);
-  const waiting = !cur && st.queue.length;              // hay canciones pero ninguna lista aún
+  const waiting = !cur && st.queue.length;
+  const local = cur && cur.kind === 'local';
   $('idle').style.display = !cur ? 'flex' : 'none';
   $('idleTitle').textContent = waiting ? '⏳ Preparando tu canción…' : '🎤 ¡Elige tu canción!';
   $('idleSub').style.display = waiting ? 'none' : '';
-  $('lyr').style.display = cur && cur.kind === 'local' ? 'flex' : 'none';
+  vid.style.display = local ? 'block' : 'none';
   $('player').style.visibility = cur && cur.kind === 'yt' ? 'visible' : 'hidden';
+  $('cast').style.display = local && canCast ? 'block' : 'none';
 
   if (!cur) { if (playing != null) { playing = null; stopAll(); $('bar').classList.remove('show'); } return; }
   const nxt = st.queue.find(s => s.qid !== cur.qid && (s.kind === 'yt' || s.status === 'ready')) || st.queue.find(s => s.qid !== cur.qid);
@@ -128,11 +94,17 @@ function sync() {
   stopAll();
   playing = cur.qid;
   showBar(cur);
-  if (cur.kind === 'yt') { if (ytReady) player.loadVideoById(cur.id); }
-  else playLocal(cur);
+  if (cur.kind === 'yt') player.loadVideoById(cur.id);
+  else {
+    vid.src = `/media/${cur.lid}/karaoke.mp4`;
+    vid.onended = next;
+    vid.onerror = () => { toast('No se pudo reproducir esa canción. Pasando a la siguiente…'); setTimeout(next, 1800); };
+    vid.play().catch(() => toast('Toca la pantalla para activar el sonido'));
+  }
 }
 
-$('start').onclick = () => { started = true; $('start').style.display = 'none'; aud.play().catch(() => {}); sync(); };
+$('start').onclick = () => { started = true; $('start').style.display = 'none'; sync(); };
+vid.onclick = () => { vid.paused ? vid.play() : vid.pause(); };
 const es = new EventSource('/events');
 es.onmessage = e => { st = JSON.parse(e.data); sync(); };
 </script>
