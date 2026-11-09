@@ -12,7 +12,20 @@ const PUBLIC = path.join(__dirname, 'public');
 const SONGS = path.join(__dirname, 'songs');            // trabajo interno (original, voces, etc.)
 // Biblioteca para la app del teléfono: Carpeta/Canción.mp4. Apúntala a una carpeta sincronizada con Google Drive:
 //   LIBRARY_DIR="G:\\Mi unidad\\Karaoke" node server.js
-const LIBRARY_DIR = path.resolve(process.env.LIBRARY_DIR || path.join(__dirname, 'biblioteca'));
+// En Windows, si no se indica LIBRARY_DIR, se busca solo la unidad de Google Drive para escritorio ("Mi unidad" / "My Drive")
+// y se usa Karaoke\canciones dentro de ella.
+function detectDrive(platform = process.platform, exists = fs.existsSync) {
+  if (platform !== 'win32') return null;
+  for (const L of 'CDEFGHIJKLMNOPQRSTUVWXYZ') {
+    for (const n of ['Mi unidad', 'My Drive']) {
+      const d = `${L}:\\${n}`;
+      if (exists(d)) return `${d}\\Karaoke\\canciones`;
+    }
+  }
+  return null;
+}
+const LIBRARY_DIR = path.resolve(process.env.LIBRARY_DIR || detectDrive() || path.join(__dirname, 'biblioteca'));
+module.exports = { detectDrive };
 const MOCK = process.env.MOCK_SEARCH === '1';
 const PYTHON = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
 const MAX_UPLOAD = 150 * 1024 * 1024;
@@ -431,4 +444,10 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`  Preparar canciones (YouTube):  http://${ip}:${PORT}/preparar\n`);
   });
   loadLibrary();
+  // "node server.js --abrir": abre la página de agregar canciones en el navegador
+  if (process.argv.includes('--abrir')) {
+    const url = `http://localhost:${PORT}/preparar`;
+    if (process.platform === 'win32') execFile('cmd', ['/c', 'start', '', url], () => {});
+    else execFile(process.platform === 'darwin' ? 'open' : 'xdg-open', [url], () => {});
+  }
 });

@@ -43,6 +43,25 @@ Karaoke casero. Las canciones se **preparan en una PC** (descarga de YouTube o a
   quien lo abra queda configurado con un toque.
 - **Instalar:** Android/Chrome → botón 📲 o menú ⋮ → *Instalar app*. iPhone/Safari → Compartir → *Añadir a pantalla de inicio*.
 
+## Uso diario en la PC (sin escribir comandos)
+La instalación se hace **una sola vez**. Para el día a día, crea un ícono de doble clic (una sola vez, pegando esto en PowerShell; ajusta la ruta si pusiste el proyecto en otro lado):
+```
+$node = (Get-Command node).Source
+$ws = New-Object -ComObject WScript.Shell
+$l = $ws.CreateShortcut([Environment]::GetFolderPath('Desktop') + '\Karaoke.lnk')
+$l.TargetPath = $node
+$l.Arguments = 'server.js --abrir'
+$l.WorkingDirectory = 'C:\karaoke\Karokapp-main\pc'
+$l.Save()
+```
+Doble clic en **Karaoke** del escritorio: arranca el servidor, encuentra solo tu Google Drive y abre la página de agregar canciones. Deja esa ventana abierta mientras se procesan canciones.
+
+**Que arranque solo al encender la PC:** crea otro acceso igual pero con `$l.Arguments = 'server.js'` (sin `--abrir`) y guárdalo en la carpeta de inicio (`shell:startup`).
+
+**Que otra persona cargue canciones sin tocar la PC:** con el servidor encendido, cualquiera de la casa, **desde su teléfono o su computadora en el mismo Wi-Fi**, abre `http://IP-DE-LA-PC:3000/preparar` (la IP aparece en la ventana negra al arrancar), pega enlaces o sube archivos y listo. Las canciones se procesan en la PC, una a la vez, y aparecen en la app de todos al terminar (⟳).
+
+**Velocidad.** Sin placa de video NVIDIA, cada canción tarda unos 25 minutos (la mayor parte es quitar la voz). Si la letra viene de internet o la pegas tú, Whisper solo aporta los tiempos y alcanza con el modelo liviano: ejecuta una vez `setx WHISPER_MODEL base` en la terminal y reinicia el programa para acortar la parte de la letra. Lo más práctico: dejar varias canciones en cola y que trabaje mientras no se usa la PC.
+
 ## Letras correctas
 La letra que escribe Whisper "al oído" puede tener errores. Hay tres formas de mejorarla (en `http://localhost:3000/preparar`, botón **Letra** de cada canción):
 1. **Automática:** al preparar cada canción, la app busca la letra en LRCLIB (gratis, sin clave). Solo la usa si coincide con el audio; si no, queda la de Whisper.
