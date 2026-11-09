@@ -9,12 +9,16 @@ const { execFile, spawn } = require('child_process');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC = path.join(__dirname, 'public');
-const SONGS = path.join(__dirname, 'songs');
+const SONGS = path.join(__dirname, 'songs');            // trabajo interno (original, voces, etc.)
+// Biblioteca para la app del teléfono: Carpeta/Canción.mp4. Apúntala a una carpeta sincronizada con Google Drive:
+//   LIBRARY_DIR="G:\\Mi unidad\\Karaoke" node server.js
+const LIBRARY_DIR = path.resolve(process.env.LIBRARY_DIR || path.join(__dirname, 'biblioteca'));
 const MOCK = process.env.MOCK_SEARCH === '1';
 const PYTHON = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
 const MAX_UPLOAD = 150 * 1024 * 1024;
 const AUDIO_EXT = new Set(['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.opus', '.mp4', '.webm']);
 fs.mkdirSync(SONGS, { recursive: true });
+fs.mkdirSync(LIBRARY_DIR, { recursive: true });
 
 let queue = [];                 // [{qid, kind:'yt'|'local', id|lid, title, thumb, singer}]
 let nextQid = 1;
@@ -98,6 +102,32 @@ function search(q) {
 const saveMeta = s => fs.writeFileSync(path.join(SONGS, s.lid, 'meta.json'), JSON.stringify(s));
 
 const FAKE = process.env.FAKE_PROCESS === '1';
+const safeName = t => String(t).replace(/[\\/:*?"<>|\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100) || 'cancion';
+
+// Copia karaoke.mp4 a LIBRARY_DIR/<carpeta>/<título>.mp4 (lo que lee la app del teléfono desde Drive)
+function unpublish(s) {
+  if (!s.published) return;
+  const f = path.resolve(LIBRARY_DIR, s.published);
+  if (f.startsWith(LIBRARY_DIR + path.sep)) {
+    fs.rmSync(f, { force: true });
+    try { fs.rmdirSync(path.dirname(f)); } catch {}      // quita la carpeta si quedó vacía
+  }
+  s.published = '';
+}
+function publish(s) {
+  try {
+    const src = path.join(SONGS, s.lid, 'karaoke.mp4');
+    if (!fs.existsSync(src)) return;
+    unpublish(s);
+    const dir = path.join(LIBRARY_DIR, safeName(s.folder));
+    fs.mkdirSync(dir, { recursive: true });
+    let n = 1, dest;
+    do { dest = path.join(dir, safeName(s.title) + (n > 1 ? ` (${n})` : '') + '.mp4'); n++; } while (fs.existsSync(dest));
+    fs.copyFileSync(src, dest);
+    s.published = path.relative(LIBRARY_DIR, dest);
+    saveMeta(s);
+  } catch (e) { console.error('No se pudo publicar en la biblioteca:', e.message); }
+}
 const lastLine = t => String(t || '').trim().split('\n').filter(Boolean).pop() || '';
 const originalFile = lid => fs.readdirSync(path.join(SONGS, lid)).find(f => /^original\.[a-z0-9]+$/i.test(f) && !f.endsWith('.json') && !f.endsWith('.part'));
 
@@ -132,6 +162,7 @@ function runNext() {
     if (!working) return;
     working = false;
     s.status = ok ? 'ready' : 'error'; s.stage = ''; s.error = ok ? '' : msg;
+    if (ok) publish(s);
     saveMeta(s); broadcast(); runNext();
   };
   const convert = () => {
@@ -192,6 +223,7 @@ function loadLibrary() {
       s.status = ok ? 'ready' : wasError ? 'error' : 'queued'; s.stage = '';
       library.set(lid, s);
       if (s.status === 'queued') jobs.push(lid);
+      if (ok && !s.published) publish(s);
     } catch {}
   }
   runNext();
@@ -261,6 +293,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (p === '/api/state') return json(res, 200, state());
+  if (p === '/api/config') return json(res, 200, { libraryDir: LIBRARY_DIR });
 
   if (p === '/api/search') {
     const q = (url.searchParams.get('q') || '').trim().slice(0, 200);
@@ -287,7 +320,9 @@ const server = http.createServer(async (req, res) => {
     const b = await readBody(req);
     const s = library.get(b.lid);
     if (!s) return json(res, 404, { error: 'No encontrada' });
-    s.folder = cleanFolder(b.folder); saveMeta(s); broadcast();
+    s.folder = cleanFolder(b.folder); saveMeta(s);
+    if (s.status === 'ready') publish(s);
+    broadcast();
     return json(res, 200, s);
   }
   // Pone en la fila todas las canciones de una carpeta (opcionalmente en orden aleatorio)
@@ -304,6 +339,7 @@ const server = http.createServer(async (req, res) => {
     const s = library.get((await readBody(req)).lid);
     if (!s) return json(res, 404, { error: 'No encontrada' });
     if (s.status === 'processing' || s.status === 'downloading') return json(res, 409, { error: 'Espera a que termine de procesarse' });
+    unpublish(s);
     library.delete(s.lid); jobs.splice(0, jobs.length, ...jobs.filter(x => x !== s.lid));
     queue = queue.filter(q => q.lid !== s.lid);
     fs.rmSync(path.join(SONGS, s.lid), { recursive: true, force: true });
@@ -353,6 +389,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, '0.0.0.0', () => {
   const ips = Object.values(os.networkInterfaces()).flat().filter(i => i.family === 'IPv4' && !i.internal).map(i => i.address);
   console.log('\n🎤 Karaoke Party listo\n');
+  console.log(`  📁 Biblioteca para la app del teléfono: ${LIBRARY_DIR}\n`);
   ips.forEach(ip => {
     console.log(`  Teléfonos (elegir canciones):  http://${ip}:${PORT}`);
     console.log(`  TV / laptop (reproductor):     http://${ip}:${PORT}/tv`);

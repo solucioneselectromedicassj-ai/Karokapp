@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1a0b2e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Karaoke">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<title>Karaoke Party</title>
+<style>
+  :root { --bg:#1a0b2e; --card:#2a1450; --pink:#ff4fa3; --text:#fff; --muted:#b9a7d6; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; font-family:system-ui,sans-serif; background:var(--bg); color:var(--text); max-width:720px; margin-inline:auto;
+         padding:0 16px calc(24px + env(safe-area-inset-bottom)); padding-top:env(safe-area-inset-top); }
+  header { display:flex; align-items:center; gap:8px; padding:12px 0; }
+  header h1 { flex:1; margin:0; font-size:1.35rem; }
+  h2 { font-size:1.05rem; margin:22px 0 6px; color:var(--pink); }
+  input, textarea { width:100%; padding:13px; border-radius:12px; border:0; font-size:1rem; font-family:inherit; margin-bottom:8px; }
+  button { background:var(--pink); color:#fff; border:0; border-radius:12px; padding:12px 16px; font-size:1rem; font-weight:600; cursor:pointer; font-family:inherit; }
+  button.sec { background:var(--card); } button.ghost { background:transparent; border:1px solid var(--muted); color:var(--muted); padding:8px 12px; font-size:.85rem; }
+  button.icon { background:var(--card); padding:10px 13px; font-size:1.05rem; }
+  button:disabled { opacity:.55; }
+  .row { display:flex; gap:8px; align-items:center; } .row > * { flex:1; } .row > .fit { flex:none; }
+  #stage { position:relative; background:#000; border-radius:14px; overflow:hidden; aspect-ratio:16/9; }
+  #stage video { width:100%; height:100%; object-fit:contain; background:#000; display:none; }
+  #stage.playing video { display:block; }
+  #idle { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:12px;
+          background:linear-gradient(135deg,#2a1450,#5a1a6e); color:#e0cfff; }
+  #stage.playing #idle { display:none; }
+  #idle b { font-size:1.2rem; color:#fff; }
+  #now { margin:8px 2px 6px; font-size:.95rem; min-height:1.3em; color:var(--muted); } #now b { color:#fff; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0; }
+  .chip { background:var(--card); font-weight:400; padding:8px 12px; border-radius:999px; font-size:.9rem; } .chip.on { background:var(--pink); font-weight:700; }
+  .item { display:flex; gap:10px; align-items:center; background:var(--card); border-radius:12px; padding:10px 10px 10px 14px; margin:8px 0; }
+  .item .t { flex:1; min-width:0; font-size:.95rem; line-height:1.25; overflow-wrap:anywhere; } .item .t small { display:block; color:var(--muted); font-size:.8rem; }
+  .item.now { border:2px solid var(--pink); }
+  .hint { color:var(--muted); font-size:.85rem; line-height:1.4; } .err { color:#ff8b8b; } a { color:var(--pink); }
+  #toast { position:fixed; left:50%; bottom:calc(20px + env(safe-area-inset-bottom)); transform:translateX(-50%); background:var(--pink); padding:10px 16px; border-radius:999px;
+           font-size:.9rem; display:none; max-width:90vw; text-align:center; z-index:20; }
+  .card { background:var(--card); border-radius:14px; padding:14px; margin:10px 0; }
+  .steps { padding-left:20px; margin:6px 0; } .steps li { margin:6px 0; }
+  dialog { background:var(--bg); color:var(--text); border:1px solid var(--card); border-radius:16px; max-width:560px; width:calc(100% - 32px); padding:16px; }
+  dialog::backdrop { background:rgba(0,0,0,.7); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎤 Karaoke Party</h1>
+  <button class="icon" id="installBtn" style="display:none" title="Instalar app">📲</button>
+  <button class="icon" id="refreshBtn" title="Actualizar canciones" style="display:none">⟳</button>
+  <button class="icon" id="settingsBtn" title="Ajustes">⚙️</button>
+</header>
+
+<!-- Configuración inicial -->
+<section id="setup" style="display:none">
+  <div class="card">
+    <b>Conecta tu carpeta de karaoke de Google Drive</b>
+    <p class="hint">Solo se hace una vez. Si alguien de la casa ya la configuró, pídele el <b>enlace de configuración</b> (⚙️ → “Copiar enlace”) y ábrelo en este teléfono.</p>
+    <input id="fFolder" placeholder="Enlace o ID de la carpeta de Drive" autocapitalize="off" autocomplete="off">
+    <input id="fKey" placeholder="Clave de API de Google (AIza…)" autocapitalize="off" autocomplete="off">
+    <button id="saveCfg" style="width:100%">Guardar y abrir</button>
+    <div id="setupErr" class="hint err"></div>
+  </div>
+  <details class="hint"><summary>¿Cómo consigo estos datos?</summary>
+    <ol class="steps">
+      <li>En Drive, comparte la carpeta con <b>“Cualquier persona con el enlace” → Lector</b> y copia su enlace.</li>
+      <li>En <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">console.cloud.google.com</a>: crea un proyecto → “APIs y servicios” → habilita <b>Google Drive API</b>.</li>
+      <li>“Credenciales” → Crear credenciales → <b>Clave de API</b>. En “Restricciones de API” elige solo <b>Google Drive API</b>.</li>
+    </ol></details>
+</section>
+
+<!-- App -->
+<main id="app" style="display:none">
+  <div id="stage">
+    <video id="vid" playsinline controls></video>
+    <div id="idle"><b>🎵 Elige una canción</b><span>Toca “Cantar” en cualquiera de la lista</span></div>
+  </div>
+  <div id="now"></div>
+  <div class="row">
+    <button class="sec" id="nextBtn">⏭ Siguiente</button>
+    <button class="sec" id="castBtn" style="display:none">📡 Transmitir a la TV</button>
+    <button class="sec fit" id="fsBtn" title="Pantalla completa">⛶</button>
+  </div>
+
+  <h2>Carpetas</h2>
+  <div class="chips" id="folders"></div>
+  <div class="row" id="folderActions" style="display:none">
+    <button id="playFolder">▶ Reproducir carpeta</button>
+    <button class="sec" id="shuffleFolder">🔀 Aleatorio</button>
+  </div>
+  <div id="songs"></div>
+  <div id="libMsg" class="hint"></div>
+
+  <h2>En la fila</h2>
+  <input id="who" placeholder="¿Quién canta?" maxlength="30">
+  <div id="queue"></div>
+</main>
+
+<dialog id="dlg">
+  <b>Ajustes</b>
+  <p class="hint" id="cfgInfo"></p>
+  <div class="row"><button class="sec" id="copyLink">📋 Copiar enlace de configuración</button></div>
+  <p class="hint">Ese enlace guarda la carpeta y la clave en otro teléfono de la casa con un solo toque.</p>
+  <div class="row" style="margin-top:12px"><button class="ghost" id="resetCfg">Cambiar carpeta / clave</button><button id="closeDlg">Cerrar</button></div>
+</dialog>
+<div id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const ls = { get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+             set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
+function toast(m) { const t = $('toast'); t.textContent = m; t.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(() => t.style.display = 'none', 3500); }
+
+// ---------- Configuración (carpeta de Drive + clave) ----------
+let cfg = ls.get('kp.cfg', null);
+const parseFolder = s => { s = String(s || '').trim(); const m = s.match(/folders\/([\w-]{10,})/) || s.match(/[?&]id=([\w-]{10,})/); return m ? m[1] : (/^[\w-]{10,}$/.test(s) ? s : ''); };
+(function fromHash() {                       // enlace de configuración: /#k=CLAVE&f=CARPETA
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (h.get('k') && h.get('f')) {
+    cfg = { key: h.get('k'), folder: parseFolder(h.get('f')), ...(h.get('api') ? { api: h.get('api') } : {}) };   // api: solo para pruebas
+    ls.set('kp.cfg', cfg); history.replaceState(null, '', location.pathname);
+  }
+})();
+const API = () => (cfg && cfg.api) || 'https://www.googleapis.com/drive/v3';
+const fileUrl = id => `${API()}/files/${id}?alt=media&key=${encodeURIComponent(cfg.key)}`;
+
+async function explain(r) {
+  if (r.status === 404) return 'No encuentro la carpeta. Revisa el enlace y que esté compartida con “Cualquier persona con el enlace”.';
+  if (r.status === 400) return 'La clave de API no es válida.';
+  if (r.status === 403) return 'Google rechazó la clave: habilita “Google Drive API” en el proyecto y revisa las restricciones de la clave.';
+  return 'Error de Drive (' + r.status + ').';
+}
+async function listFolder(id) {
+  const files = []; let token = '';
+  do {
+    const p = new URLSearchParams({ q: `'${id}' in parents and trashed=false`, fields: 'nextPageToken,files(id,name,mimeType)', pageSize: '1000', orderBy: 'name', key: cfg.key });
+    if (token) p.set('pageToken', token);
+    const r = await fetch(`${API()}/files?${p}`);
+    if (!r.ok) throw new Error(await explain(r));
+    const j = await r.json(); files.push(...j.files); token = j.nextPageToken || '';
+  } while (token);
+  return files;
+}
+const isVideo = f => /^video\//.test(f.mimeType) || /\.mp4$/i.test(f.name);
+const isFolder = f => f.mimeType === 'application/vnd.google-apps.folder';
+const title = n => n.replace(/\.(mp4|m4v|mov|webm)$/i, '');
+
+// ---------- Biblioteca ----------
+let lib = ls.get('kp.lib', []);                       // [{name, songs:[{id,title}]}]
+let folder = ls.get('kp.folder', '*');
+async function loadLibrary(manual) {
+  $('libMsg').textContent = 'Cargando canciones…';
+  try {
+    const root = await listFolder(cfg.folder);
+    const subs = root.filter(isFolder);
+    const loose = root.filter(isVideo).map(f => ({ id: f.id, title: title(f.name) }));
+    const out = await Promise.all(subs.map(async d => ({ name: d.name, songs: (await listFolder(d.id)).filter(isVideo).map(f => ({ id: f.id, title: title(f.name) })) })));
+    lib = [...out.filter(f => f.songs.length), ...(loose.length ? [{ name: 'General', songs: loose }] : [])];
+    ls.set('kp.lib', lib);
+    $('libMsg').textContent = lib.length ? '' : 'La carpeta no tiene canciones todavía. Prepáralas en la PC y espera a que Drive las sincronice.';
+    if (manual) toast('Canciones actualizadas');
+  } catch (e) {
+    $('libMsg').innerHTML = `<span class="err">⚠️ ${esc(e.message === 'Failed to fetch' ? 'Sin conexión con Google Drive.' : e.message)}</span>` + (lib.length ? ' Mostrando la última lista guardada.' : '');
+  }
+  renderLibrary();
+}
+function renderLibrary() {
+  if (folder !== '*' && !lib.some(f => f.name === folder)) folder = '*';
+  const total = lib.reduce((n, f) => n + f.songs.length, 0);
+  $('folders').innerHTML = [`<button class="chip ${folder === '*' ? 'on' : ''}" data-f="*">Todas (${total})</button>`,
+    ...lib.map(f => `<button class="chip ${f.name === folder ? 'on' : ''}" data-f="${esc(f.name)}">📁 ${esc(f.name)} (${f.songs.length})</button>`)].join('');
+  const songs = visibleSongs();
+  $('folderActions').style.display = songs.length ? 'flex' : 'none';
+  $('songs').innerHTML = songs.map((s, i) => `<div class="item"><div class="t">🎵 ${esc(s.title)}${folder === '*' ? `<small>📁 ${esc(s.folder)}</small>` : ''}</div>
+    <button data-i="${i}">Cantar</button></div>`).join('');
+}
+const visibleSongs = () => lib.filter(f => folder === '*' || f.name === folder).flatMap(f => f.songs.map(s => ({ ...s, folder: f.name })));
+$('folders').onclick = e => { const b = e.target.closest('button[data-f]'); if (b) { folder = b.dataset.f; ls.set('kp.folder', folder); renderLibrary(); } };
+$('songs').onclick = e => { const b = e.target.closest('button[data-i]'); if (b) { enqueue([visibleSongs()[+b.dataset.i]]); b.textContent = '✓ Añadida'; } };
+const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+$('playFolder').onclick = () => enqueue(visibleSongs());
+$('shuffleFolder').onclick = () => enqueue(shuffle(visibleSongs()));
+
+// ---------- Fila y reproducción ----------
+let queue = ls.get('kp.queue', []), playing = null, qid = Date.now();
+const vid = $('vid'), who = $('who'); who.value = ls.get('kp.who', ''); who.oninput = () => ls.set('kp.who', who.value);
+function enqueue(songs) {
+  const singer = who.value.trim() || 'Fiesta';
+  songs.forEach(s => queue.push({ qid: ++qid, id: s.id, title: s.title, singer }));
+  saveQueue(); renderQueue(); if (playing == null) playNext();
+  toast(songs.length > 1 ? `${songs.length} canciones añadidas` : 'Añadida a la fila');
+}
+const saveQueue = () => ls.set('kp.queue', queue);
+function renderQueue() {
+  $('queue').innerHTML = queue.length ? queue.map((s, i) => `<div class="item ${s.qid === playing ? 'now' : ''}"><div class="t">${s.qid === playing ? '▶️ Sonando · ' : (i + 1) + '. '}<b>${esc(s.singer)}</b><small>${esc(s.title)}</small></div>
+    <button class="ghost" data-rm="${s.qid}">Quitar</button></div>`).join('') : '<p class="hint">La fila está vacía.</p>';
+}
+$('queue').onclick = e => { const b = e.target.closest('button[data-rm]'); if (!b) return; const id = +b.dataset.rm; if (id === playing) return advance(); queue = queue.filter(s => s.qid !== id); saveQueue(); renderQueue(); };
+
+function playNext() {                                // reproduce la primera de la fila (queue[0] = la que suena)
+  const cur = queue[0];
+  if (!cur) { playing = null; $('stage').classList.remove('playing'); vid.removeAttribute('src'); vid.load(); $('now').textContent = ''; setWake(false); renderQueue(); return; }
+  playing = cur.qid;
+  $('stage').classList.add('playing');
+  $('now').innerHTML = `🎤 <b>${esc(cur.singer)}</b> — ${esc(cur.title)}`;
+  vid.src = fileUrl(cur.id);
+  vid.play().catch(() => toast('Toca ▶ para empezar'));
+  setWake(true); renderQueue();
+  if ('mediaSession' in navigator) { try { navigator.mediaSession.metadata = new MediaMetadata({ title: cur.title, artist: cur.singer, album: 'Karaoke Party', artwork: [{ src: '/icon-512.png', sizes: '512x512', type: 'image/png' }] }); } catch {} }
+}
+function advance() { queue.shift(); saveQueue(); playNext(); }
+vid.onended = advance;
+vid.onerror = () => { if (playing == null) return; toast('No pude reproducir esa canción. Pasando a la siguiente…'); setTimeout(advance, 1500); };
+$('nextBtn').onclick = () => { if (playing != null) advance(); };
+if ('mediaSession' in navigator) { try { navigator.mediaSession.setActionHandler('nexttrack', () => { if (playing != null) advance(); }); } catch {} }
+$('fsBtn').onclick = () => { const st = $('stage'); (st.requestFullscreen ? st.requestFullscreen() : vid.webkitEnterFullscreen && vid.webkitEnterFullscreen()); };
+let wake = null;
+async function setWake(on) { try { if (on && 'wakeLock' in navigator && !wake) wake = await navigator.wakeLock.request('screen'); else if (!on && wake) { await wake.release(); wake = null; } } catch { wake = null; } }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && playing != null) { wake = null; setWake(true); } });
+
+// Transmitir a la TV: Chromecast / Google Cast (Chrome) o AirPlay (Safari)
+if ('remote' in vid || typeof vid.webkitShowPlaybackTargetPicker === 'function') $('castBtn').style.display = '';
+$('castBtn').onclick = () => {
+  if (playing == null) return toast('Primero elige una canción');
+  if ('remote' in vid) vid.remote.prompt().catch(e => toast(e.name === 'NotFoundError' ? 'No encontré TVs. ¿Están en el mismo Wi-Fi?' : 'No se pudo transmitir'));
+  else vid.webkitShowPlaybackTargetPicker();
+};
+
+// ---------- Ajustes e instalación ----------
+function showView() {
+  const ok = cfg && cfg.key && cfg.folder;
+  $('setup').style.display = ok ? 'none' : ''; $('app').style.display = ok ? '' : 'none'; $('refreshBtn').style.display = ok ? '' : 'none';
+  if (ok) { renderLibrary(); renderQueue(); loadLibrary(); }
+}
+$('saveCfg').onclick = async () => {
+  const folderId = parseFolder($('fFolder').value), key = $('fKey').value.trim();
+  if (!folderId) { $('setupErr').textContent = 'No reconozco ese enlace de carpeta.'; return; }
+  if (!key) { $('setupErr').textContent = 'Falta la clave de API.'; return; }
+  cfg = { key, folder: folderId }; $('setupErr').textContent = 'Comprobando…';
+  try { await listFolder(folderId); ls.set('kp.cfg', cfg); $('setupErr').textContent = ''; showView(); }
+  catch (e) { cfg = null; $('setupErr').textContent = '⚠️ ' + e.message; }
+};
+$('settingsBtn').onclick = () => { $('cfgInfo').textContent = cfg ? 'Carpeta conectada: ' + cfg.folder : 'Todavía no hay carpeta conectada.'; $('dlg').showModal(); };
+$('closeDlg').onclick = () => $('dlg').close();
+$('copyLink').onclick = async () => {
+  if (!cfg) return;
+  const link = `${location.origin}/#k=${encodeURIComponent(cfg.key)}&f=${encodeURIComponent(cfg.folder)}`;
+  try { await navigator.clipboard.writeText(link); toast('Enlace copiado. Pégalo en WhatsApp'); } catch { prompt('Copia este enlace:', link); }
+};
+$('resetCfg').onclick = () => { if (confirm('¿Cambiar la carpeta y la clave de este teléfono?')) { ls.set('kp.cfg', null); cfg = null; $('dlg').close(); showView(); } };
+$('refreshBtn').onclick = () => loadLibrary(true);
+
+let deferred = null;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferred = e; $('installBtn').style.display = ''; });
+$('installBtn').onclick = async () => { if (deferred) { deferred.prompt(); await deferred.userChoice; deferred = null; $('installBtn').style.display = 'none'; } };
+window.addEventListener('appinstalled', () => { $('installBtn').style.display = 'none'; });
+const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+if (!standalone && /iphone|ipad|ipod/i.test(navigator.userAgent)) { $('installBtn').style.display = ''; $('installBtn').onclick = () => toast('Para instalar: Compartir ⎙ → Añadir a pantalla de inicio'); }
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+showView();
+</script>
+</body>
+</html>

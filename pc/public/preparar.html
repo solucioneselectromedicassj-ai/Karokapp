@@ -53,6 +53,7 @@
 </div>
 <p class="hint">Usa canciones <b>originales con voz</b>: la app les quita la voz y escribe la letra. Tarda unos minutos por canción; puedes cerrar esta página y seguirá trabajando. Hazlo <b>antes</b> de la fiesta.</p>
 
+<p class="hint" id="libdir"></p>
 <h2 id="count">Biblioteca</h2>
 <div id="lib"></div>
 
@@ -112,6 +113,7 @@ $('lib').onclick = async e => {
   const r = await fetch('/api/library/' + a, { method:'POST', body: JSON.stringify(body) });
   if (!r.ok) alert((await r.json()).error || 'Error');
 };
+fetch('/api/config').then(r => r.json()).then(c => { $('libdir').innerHTML = '📱 Las canciones listas se copian a: <b>' + esc(c.libraryDir) + '</b> (compártela desde Drive para la app del teléfono).'; }).catch(() => {});
 const es = new EventSource('/events');
 es.onmessage = e => {
   const d = JSON.parse(e.data), lib = d.library;
