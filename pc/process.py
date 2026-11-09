@@ -119,6 +119,17 @@ def make_video(folder, lyrics, title):
     (folder / "karaoke.ass").unlink(missing_ok=True)
 
 
+def load_audio_16k(path):
+    """Decodifica el audio con ffmpeg a mono 16 kHz (float32). Evita 'av.open(metadata_errors=...)' de faster-whisper,
+    que falla con las versiones nuevas de PyAV."""
+    import numpy as np
+    r = subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-i", str(path), "-f", "f32le", "-ac", "1", "-ar", "16000", "-"],
+                       capture_output=True)
+    if r.returncode != 0:
+        raise RuntimeError("ffmpeg no pudo leer el audio: " + r.stderr.decode(errors="replace").strip()[-200:])
+    return np.frombuffer(r.stdout, dtype=np.float32)
+
+
 def to_mp3(src, dst):
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-b:a", "192k", str(dst)], check=True)
 
@@ -150,10 +161,13 @@ def main():
     # 1) Quitar la voz
     stage("separating")
     sep = folder / "sep"
-    subprocess.run([sys.executable, "-m", "demucs", "--two-stems=vocals", "-n", "htdemucs",
-                    "-o", str(sep), str(src)], check=True)
-    vocals_wav = next(sep.glob("*/*/vocals.wav"))
-    novocals_wav = next(sep.glob("*/*/no_vocals.wav"))
+    vocals_wav = next(iter(sep.glob("*/*/vocals.wav")), None)
+    novocals_wav = next(iter(sep.glob("*/*/no_vocals.wav")), None)
+    if not (vocals_wav and novocals_wav):      # si ya se separó antes (reintento), no se repite: tarda mucho
+        subprocess.run([sys.executable, "-m", "demucs", "--two-stems=vocals", "-n", "htdemucs",
+                        "-o", str(sep), str(src)], check=True)
+        vocals_wav = next(sep.glob("*/*/vocals.wav"))
+        novocals_wav = next(sep.glob("*/*/no_vocals.wav"))
     to_mp3(novocals_wav, folder / "instrumental.mp3")
     to_mp3(vocals_wav, folder / "vocals.mp3")
 
@@ -168,7 +182,7 @@ def main():
     model_name = os.environ.get("WHISPER_MODEL", "large-v3" if gpu else "small")
     model = WhisperModel(model_name, device="cuda" if gpu else "cpu",
                          compute_type="float16" if gpu else "int8")
-    segments, _ = model.transcribe(str(vocals_wav), language=None if lang == "auto" else lang,
+    segments, _ = model.transcribe(load_audio_16k(vocals_wav), language=None if lang == "auto" else lang,
                                    word_timestamps=True, vad_filter=True)
     lyrics = build_lyrics(list(segments))
     (folder / "lyrics.json").write_text(json.dumps(lyrics, ensure_ascii=False))
