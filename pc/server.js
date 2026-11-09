@@ -84,7 +84,7 @@ function search(q) {
       })));
     }
     const term = /karaoke/i.test(q) ? q : `${q} karaoke`;
-    execFile('yt-dlp', [`ytsearch10:${term}`, '--flat-playlist', '--dump-json', '--no-warnings'],
+    ytdlp([`ytsearch10:${term}`, '--flat-playlist', '--dump-json', '--no-warnings'],
       { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
         if (err && !stdout) return scrapeSearch(term).then(resolve, () => reject(err));
         resolve(stdout.split('\n').filter(Boolean).map(l => {
@@ -102,6 +102,13 @@ function search(q) {
 const saveMeta = s => fs.writeFileSync(path.join(SONGS, s.lid, 'meta.json'), JSON.stringify(s));
 
 const FAKE = process.env.FAKE_PROCESS === '1';
+function ytdlp(args, opts, cb) {
+  execFile('yt-dlp', args, opts, (err, so, se) => {
+    if (err && err.code === 'ENOENT') return execFile(PYTHON, ['-m', 'yt_dlp', ...args], opts, cb);
+    cb(err, so, se);
+  });
+}
+const noYtdlp = (err, errOut) => err && (err.code === 'ENOENT' || /No module named yt_dlp/.test(String(errOut)));
 const safeName = t => String(t).replace(/[\\/:*?"<>|\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100) || 'cancion';
 
 // Copia karaoke.mp4 a LIBRARY_DIR/<carpeta>/<título>.mp4 (lo que lee la app del teléfono desde Drive)
@@ -139,10 +146,10 @@ function download(s) {
       return execFile('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=330:duration=10', path.join(dir, 'original.mp3')],
         err => err ? reject(new Error('ffmpeg no está instalado')) : resolve());
     }
-    execFile('yt-dlp', ['--no-playlist', '-x', '--audio-format', 'mp3', '--audio-quality', '0', '--write-info-json', '--no-warnings',
+    ytdlp(['--no-playlist', '-x', '--audio-format', 'mp3', '--audio-quality', '0', '--write-info-json', '--no-warnings',
       '-o', path.join(dir, 'original.%(ext)s'), 'https://www.youtube.com/watch?v=' + s.yt],
       { timeout: 10 * 60 * 1000, maxBuffer: 10 * 1024 * 1024 }, (err, out, errOut) => {
-        if (err) return reject(new Error(err.code === 'ENOENT'
+        if (err) return reject(new Error(noYtdlp(err, errOut)
           ? 'yt-dlp no está instalado (pip install yt-dlp)' : lastLine(errOut) || err.message));
         const info = path.join(dir, 'original.info.json');
         try { const j = JSON.parse(fs.readFileSync(info, 'utf8')); if (j.title) s.title = j.title.slice(0, 120); } catch {}

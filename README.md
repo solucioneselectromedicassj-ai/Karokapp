@@ -13,6 +13,13 @@ Karaoke casero. Las canciones se **preparan en una PC** (descarga de YouTube o a
 | `player/` | App instalable (página estática) que lee la carpeta de Drive y reproduce. Es lo que publica Vercel (`vercel.json`). |
 | `tools/mock-drive.js` | Simula la API de Drive para probar la app sin Google. |
 
+## Atajo para Windows (la PC que prepara las canciones)
+1. Descarga el proyecto (GitHub → Code → Download ZIP) y descomprímelo.
+2. Doble clic en **`instalar.bat`**: instala Node.js, Python y ffmpeg con winget. Instala también **Google Drive para escritorio** (https://www.google.com/drive/download/) e inicia sesión.
+3. Cierra la ventana y doble clic en **`iniciar.bat`**: la primera vez instala los componentes de IA (tarda y descarga varios GB), después detecta tu Drive, usa `Mi unidad\Karaoke\canciones` como biblioteca y abre `http://localhost:3000/preparar`.
+4. En esa página: escribe la **carpeta** (ej. "Cumple de Lissa"), pega los enlaces de YouTube (uno por línea) y toca **Descargar y convertir en karaoke**.
+   Cuando diga "Lista para la fiesta", el video aparece en Drive; en la app del teléfono toca ⟳.
+
 ## Puesta en marcha (una vez)
 
 ### 1. PC: preparar canciones y llenar la carpeta de Drive
