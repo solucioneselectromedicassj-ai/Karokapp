@@ -11,6 +11,7 @@ http.createServer((req, res) => {
   if (p.startsWith('/drive/v3/files')) {
     if (u.searchParams.get('key') !== 'TESTKEY') return send(res, 400, { error: 'API key not valid' });
     const m = p.match(/^\/drive\/v3\/files\/(\w+)$/);
+    if (m && !u.searchParams.get('alt')) return (m[1] === 'PRIVATE_FOLDER_ID_001' || m[1] === 'NOPE_FOLDER_ID_0001') ? send(res, 404, {}) : send(res, 200, { id: m[1] });   // metadatos
     if (m && u.searchParams.get('alt') === 'media') {              // descarga con Range
       const f = dec(m[1]); if (!fs.existsSync(f)) return send(res, 404, {});
       const size = fs.statSync(f).size, r = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
@@ -21,6 +22,7 @@ http.createServer((req, res) => {
     const parent = (u.searchParams.get('q') || '').match(/'(\w+)' in parents/);   // listar
     if (!parent) return send(res, 400, {});
     if (parent[1] === 'NOPE_FOLDER_ID_0001') return send(res, 404, {});
+    if (parent[1] === 'PRIVATE_FOLDER_ID_001') return send(res, 200, { files: [] });   // Drive responde vacío si la carpeta no es pública
     const dir = parent[1] === 'ROOTFOLDER_ID_0001' ? LIB : dec(parent[1]);
     if (!fs.existsSync(dir)) return send(res, 404, {});
     const rel = parent[1] === 'ROOTFOLDER_ID_0001' ? '' : Buffer.from(parent[1], 'hex').toString();

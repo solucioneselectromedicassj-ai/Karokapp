@@ -31,7 +31,7 @@ Karaoke casero. Las canciones se **preparan en una PC** (descarga de YouTube o a
    Cada canción lista aparece sola como `Karaoke/Cumple de Lissa/<canción>.mp4`, y Drive la sube.
 
 ### 2. Compartir la carpeta y crear la clave
-1. En drive.google.com: clic derecho en `Karaoke` → Compartir → **“Cualquier persona con el enlace” → Lector**. Copia el enlace.
+1. En Drive: carpeta `canciones` → Compartir → **Acceso general → “Cualquier persona con el enlace” → Lector**. Copia el enlace. **Sin este paso la app ve la carpeta vacía** (Drive no da error, devuelve una lista vacía).
 2. En [console.cloud.google.com](https://console.cloud.google.com/): crea un proyecto → *APIs y servicios* → **habilita “Google Drive API”**.
 3. *Credenciales* → Crear credenciales → **Clave de API**. En “Restricciones de API” elige solo **Google Drive API**.
    (No pongas restricción por sitio web: Chromecast no envía esa cabecera y la transmisión fallaría.)
@@ -43,8 +43,17 @@ Karaoke casero. Las canciones se **preparan en una PC** (descarga de YouTube o a
   quien lo abra queda configurado con un toque.
 - **Instalar:** Android/Chrome → botón 📲 o menú ⋮ → *Instalar app*. iPhone/Safari → Compartir → *Añadir a pantalla de inicio*.
 
+## Letras correctas
+La letra que escribe Whisper "al oído" puede tener errores. Hay tres formas de mejorarla (en `http://localhost:3000/preparar`, botón **Letra** de cada canción):
+1. **Automática:** al preparar cada canción, la app busca la letra en LRCLIB (gratis, sin clave). Solo la usa si coincide con el audio; si no, queda la de Whisper.
+2. **Pegar la letra** correcta, o subir un archivo **.txt, .lrc o .srt**. La app toma el texto del archivo (los tiempos los calcula con el audio, así no importa si tu archivo es de otra versión).
+3. **Dejar la ventana vacía** y aplicar: vuelve a buscarla en internet.
+Cambiar la letra tarda menos de un minuto (no vuelve a separar la voz) y reemplaza el video en Drive. Un video con subtítulos *grabados en la imagen* no sirve.
+
 ## Uso diario
-Abrir la app → elegir **carpeta** → **▶ Reproducir carpeta** (o 🔀) o **Cantar** en una canción → **📡 Transmitir a la TV** (Chromecast / Smart TV con Google Cast; AirPlay en iPhone).
+Abrir la app → elegir **carpeta** → **▶ Reproducir carpeta** (o 🔀) o **Cantar** en una canción.
+**Para ver en la TV (Chromecast / Smart TV con Google Cast):** en Chrome, menú ⋮ → **Transmitir…** → elige la TV. La TV muestra toda la app y sigues eligiendo canciones desde el teléfono sin volver a conectar.
+(El botón 📡 de la app transmite solo el video de la canción que suena, por eso pide empezar una canción primero. En iPhone: AirPlay.)
 Si agregaste canciones nuevas desde la PC, toca ⟳ para actualizar la lista.
 
 ## Notas

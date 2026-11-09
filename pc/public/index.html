@@ -79,7 +79,7 @@ let data = { queue: [], current: null, library: [], folders: [] };
 let folder = get('kfolder') || '*';      // '*' = todas
 
 // ---------- Carpetas y biblioteca ----------
-const STAGES = { starting:'Iniciando…', separating:'Quitando la voz…', transcribing:'Escribiendo la letra…', rendering:'Creando el video…', done:'Terminando…' };
+const STAGES = { starting:'Iniciando…', searching_lyrics:'Buscando la letra…', separating:'Quitando la voz…', transcribing:'Escribiendo la letra…', rendering:'Creando el video…', done:'Terminando…' };
 function status(s) {
   if (s.status === 'ready') return '<span class="st ok">✅ Lista</span>';
   if (s.status === 'error') return `<span class="st err">⚠️ ${esc(s.error || 'Error')}</span>`;

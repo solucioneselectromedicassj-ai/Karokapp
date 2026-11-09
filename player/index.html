@@ -100,6 +100,12 @@
   <div id="queue"></div>
 </main>
 
+<dialog id="castDlg">
+  <b>Mostrar en la TV</b>
+  <p class="hint"><b>Opción 1: toda la app en la TV (recomendada).</b> En Chrome toca el menú ⋮ → <b>Transmitir…</b> y elige tu TV. La TV muestra la app y sigues eligiendo canciones desde el teléfono, sin volver a conectar.</p>
+  <p class="hint"><b>Opción 2: solo el video.</b> Empieza una canción (toca “Cantar”) y luego este botón <b>📡 Transmitir a la TV</b>.</p>
+  <div class="row" style="margin-top:10px"><button id="castClose">Entendido</button></div>
+</dialog>
 <dialog id="dlg">
   <b>Ajustes</b>
   <p class="hint" id="cfgInfo"></p>
@@ -135,6 +141,12 @@ async function explain(r) {
   if (r.status === 403) return 'Google rechazó la clave: habilita “Google Drive API” en el proyecto y revisa las restricciones de la clave.';
   return 'Error de Drive (' + r.status + ').';
 }
+const NOT_SHARED = 'La carpeta no está compartida. En Drive: abre la carpeta de canciones → Compartir → Acceso general → “Cualquier persona con el enlace” → Lector. Luego toca ⟳.';
+// Drive responde con una lista VACÍA (no con error) cuando la carpeta no es pública: por eso se comprueba aparte.
+async function folderReadable() {
+  try { return (await fetch(`${API()}/files/${cfg.folder}?fields=id&key=${encodeURIComponent(cfg.key)}`)).ok; }
+  catch { return true; }                         // sin conexión: no culpar a los permisos
+}
 async function listFolder(id) {
   const files = []; let token = '';
   do {
@@ -160,7 +172,9 @@ async function loadLibrary(manual) {
     const subs = root.filter(isFolder);
     const loose = root.filter(isVideo).map(f => ({ id: f.id, title: title(f.name) }));
     const out = await Promise.all(subs.map(async d => ({ name: d.name, songs: (await listFolder(d.id)).filter(isVideo).map(f => ({ id: f.id, title: title(f.name) })) })));
-    lib = [...out.filter(f => f.songs.length), ...(loose.length ? [{ name: 'General', songs: loose }] : [])];
+    const next = [...out.filter(f => f.songs.length), ...(loose.length ? [{ name: 'General', songs: loose }] : [])];
+    if (!next.length && !(await folderReadable())) throw new Error(NOT_SHARED);
+    lib = next;
     ls.set('kp.lib', lib);
     $('libMsg').textContent = lib.length ? '' : 'La carpeta no tiene canciones todavía. Prepáralas en la PC y espera a que Drive las sincronice.';
     if (manual) toast('Canciones actualizadas');
@@ -226,10 +240,13 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 // Transmitir a la TV: Chromecast / Google Cast (Chrome) o AirPlay (Safari)
 if ('remote' in vid || typeof vid.webkitShowPlaybackTargetPicker === 'function') $('castBtn').style.display = '';
 $('castBtn').onclick = () => {
-  if (playing == null) return toast('Primero elige una canción');
+  if (playing == null) return $('castDlg').showModal();
   if ('remote' in vid) vid.remote.prompt().catch(e => toast(e.name === 'NotFoundError' ? 'No encontré TVs. ¿Están en el mismo Wi-Fi?' : 'No se pudo transmitir'));
   else vid.webkitShowPlaybackTargetPicker();
 };
+
+if ('remote' in vid) { vid.remote.onconnect = () => toast('Transmitiendo a la TV'); vid.remote.ondisconnect = () => toast('Se desconectó de la TV'); }
+$('castClose').onclick = () => $('castDlg').close();
 
 // ---------- Ajustes e instalación ----------
 function showView() {
@@ -242,7 +259,7 @@ $('saveCfg').onclick = async () => {
   if (!folderId) { $('setupErr').textContent = 'No reconozco ese enlace de carpeta.'; return; }
   if (!key) { $('setupErr').textContent = 'Falta la clave de API.'; return; }
   cfg = { key, folder: folderId }; $('setupErr').textContent = 'Comprobando…';
-  try { await listFolder(folderId); ls.set('kp.cfg', cfg); $('setupErr').textContent = ''; showView(); }
+  try { await listFolder(folderId); if (!(await folderReadable())) throw new Error(NOT_SHARED); ls.set('kp.cfg', cfg); $('setupErr').textContent = ''; showView(); }
   catch (e) { cfg = null; $('setupErr').textContent = '⚠️ ' + e.message; }
 };
 $('settingsBtn').onclick = () => { $('cfgInfo').textContent = cfg ? 'Carpeta conectada: ' + cfg.folder : 'Todavía no hay carpeta conectada.'; $('dlg').showModal(); };

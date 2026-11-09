@@ -25,6 +25,8 @@
   .item .t { flex:1; min-width:0; font-size:.95rem; } .st { font-size:.8rem; color:var(--muted); display:block; }
   .ok { color:#6ee7a0 } .err { color:#ff8b8b }
   .hint { color:var(--muted); font-size:.85rem; } a { color:var(--pink); }
+  dialog { background:var(--bg); color:var(--text); border:1px solid var(--card); border-radius:16px; max-width:600px; width:calc(100% - 32px); padding:16px; }
+  dialog::backdrop { background:rgba(0,0,0,.7); }
   .msg { min-height:1.3em; margin-top:8px; font-size:.9rem; color:var(--muted); }
 </style>
 </head>
@@ -55,7 +57,16 @@
 
 <p class="hint" id="libdir"></p>
 <h2 id="count">Biblioteca</h2>
+<p class="hint">Si la letra no coincide con la canción, toca <b>Letra</b> en esa canción: pega la letra correcta (o súbela como .txt, .lrc o .srt) y la app la sincroniza con el audio en segundos.</p>
 <div id="lib"></div>
+
+<dialog id="lyDlg">
+  <b id="lyTitle"></b>
+  <p class="hint">Pega la letra correcta (con o sin tiempos) o sube un archivo <b>.txt, .lrc o .srt</b>. Si la dejas <b>vacía</b>, la app la busca sola en internet. Tarda menos de un minuto.</p>
+  <textarea id="lyText" rows="10" placeholder="Pega aquí la letra…"></textarea>
+  <input type="file" id="lyFile" accept=".txt,.lrc,.srt,.vtt,text/plain" style="margin-top:8px">
+  <div class="row"><button class="ghost" id="lyCancel">Cancelar</button><button id="lySave">Aplicar letra</button></div>
+</dialog>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -63,9 +74,9 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>
 const get = k => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
 const put = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 $('folder').value = get('prepfolder'); $('folder').onchange = () => put('prepfolder', $('folder').value);
-const STAGES = { starting:'Iniciando…', separating:'Quitando la voz…', transcribing:'Escribiendo la letra…', rendering:'Creando el video…', done:'Terminando…' };
+const STAGES = { starting:'Iniciando…', searching_lyrics:'Buscando la letra…', separating:'Quitando la voz…', transcribing:'Escribiendo la letra…', rendering:'Creando el video…', done:'Terminando…' };
 function status(s) {
-  if (s.status === 'ready') return '<span class="st ok">✅ Lista para la fiesta</span>';
+  if (s.status === 'ready') return '<span class="st ok">✅ Lista para la fiesta</span>' + (s.error ? `<span class="st err">⚠️ ${esc(s.error)}</span>` : '');
   if (s.status === 'error') return `<span class="st err">⚠️ ${esc(s.error || 'Error')}</span>`;
   if (s.status === 'downloading') return '<span class="st">⬇️ Descargando de YouTube…</span>';
   if (s.status === 'processing') return `<span class="st">⏳ ${STAGES[s.stage] || 'Procesando…'}</span>`;
@@ -107,6 +118,7 @@ $('goFiles').onclick = async () => {
 $('lib').onclick = async e => {
   const b = e.target.closest('button[data-a]'); if (!b) return;
   const a = b.dataset.a, lid = b.dataset.lid;
+  if (a === 'lyrics') { openLyrics(lid, b.dataset.title); return; }
   let body = { lid };
   if (a === 'delete' && !confirm('¿Borrar esta canción de la biblioteca?')) return;
   if (a === 'move') { const f = prompt('Mover a la carpeta:', b.dataset.folder); if (f === null) return; body.folder = f; }
@@ -120,13 +132,25 @@ es.onmessage = e => {
   $('folderList').innerHTML = d.folders.map(f => `<option value="${esc(f)}">`).join('');
   $('count').textContent = `Biblioteca · ${lib.filter(s => s.status === 'ready').length} listas de ${lib.length}`;
   $('lib').innerHTML = lib.length ? lib.map(s => `
-    <div class="item"><div class="t">🎵 ${esc(s.title)}${status(s)}<span class="st">📁 ${esc(s.folder)}</span></div>
+    <div class="item"><div class="t">🎵 ${esc(s.title)}${status(s)}<span class="st">📁 ${esc(s.folder)}${s.status === 'ready' && s.lyricsSource ? ' · 📝 Letra: ' + ({manual:'pegada por ti', lrclib:'encontrada en internet', whisper:'transcrita (puede tener errores)'}[s.lyricsSource] || s.lyricsSource) : ''}</span></div>
       ${s.status === 'error' ? `<button class="ghost" data-a="retry" data-lid="${s.lid}">Reintentar</button>` : ''}
+      ${s.status === 'ready' ? `<button class="ghost" data-a="lyrics" data-lid="${s.lid}" data-title="${esc(s.title)}">Letra</button>` : ''}
       <button class="ghost" data-a="move" data-lid="${s.lid}" data-folder="${esc(s.folder)}">Carpeta</button>
       <button class="ghost" data-a="delete" data-lid="${s.lid}">Borrar</button></div>`).join('')
     : '<p class="hint">Aún no hay canciones.</p>';
 };
 </script>
-<script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});</script>
+<script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+// ----- Letra correcta -----
+let lyLid = null;
+function openLyrics(lid, title) { lyLid = lid; $('lyTitle').textContent = title; $('lyText').value = ''; $('lyFile').value = ''; $('lyDlg').showModal(); }
+$('lyFile').onchange = async e => { const f = e.target.files[0]; if (f) $('lyText').value = await f.text(); };
+$('lyCancel').onclick = () => $('lyDlg').close();
+$('lySave').onclick = async () => {
+  const r = await fetch('/api/library/lyrics', { method:'POST', body: JSON.stringify({ lid: lyLid, text: $('lyText').value }) });
+  if (!r.ok) alert((await r.json()).error || 'Error'); else $('lyDlg').close();
+};
+</script>
+
 </body>
 </html>

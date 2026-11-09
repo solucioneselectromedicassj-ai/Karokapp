@@ -7,7 +7,8 @@ Entrada : <carpeta>/original.<ext>
 Salida  : <carpeta>/instrumental.mp3, vocals.mp3, lyrics.json, karaoke.mp4
 Imprime líneas "STAGE <nombre>" para que el servidor muestre el progreso.
 """
-import json, os, shutil, subprocess, sys
+import difflib, json, os, re, shutil, subprocess, sys, unicodedata
+import urllib.parse, urllib.request
 from pathlib import Path
 
 
@@ -28,6 +29,163 @@ def build_lyrics(segments):
         ]
         out.append({"start": round(seg.start, 2), "end": round(seg.end, 2), "text": text, "words": words})
     return out
+
+
+# ---------- Letra correcta: limpiar, alinear con el audio y buscarla en línea ----------
+SECTION = re.compile(r"^\W*(coro|estribillo|verso|puente|intro|outro|pre-?coro|pre-?estribillo|chorus|verse|bridge|pre-?chorus|hook|interludio|instrumental)\b[^\n]{0,30}$", re.I)
+
+
+def clean_lyrics_text(text):
+    """Acepta texto plano, LRC o SRT/VTT y devuelve solo las líneas de la letra."""
+    lines = []
+    for raw in str(text).replace("\r", "").split("\n"):
+        t = raw.strip().lstrip("﻿")
+        if not t or t.upper() == "WEBVTT" or re.fullmatch(r"\d+", t):            # vacías, cabecera VTT, números de SRT
+            continue
+        if re.search(r"\d{1,2}:\d{2}:\d{2}[.,]\d{1,3}\s*-->", t):                 # tiempos SRT/VTT
+            continue
+        if re.match(r"^\[(ti|ar|al|by|offset|length|re|ve|au):", t, re.I):          # metadatos LRC
+            continue
+        t = re.sub(r"\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]|<\d{1,3}:\d{2}(?:[.:]\d{1,3})?>", "", t)   # [mm:ss.xx]
+        t = re.sub(r"</?[a-zA-Z][^>]*>", "", t).strip()                             # <i>…</i>
+        if not t or re.fullmatch(r"\[[^\]]*\]", t) or SECTION.match(t):             # [Coro], Verso 1:
+            continue
+        lines.append(re.sub(r"\s+", " ", t))
+    return lines
+
+
+def norm_word(w):
+    w = unicodedata.normalize("NFD", str(w).lower())
+    w = "".join(c for c in w if unicodedata.category(c) != "Mn")
+    return re.sub(r"[^\w]", "", w)
+
+
+def align_lyrics(lines, asr_words, duration=0.0):
+    """Pone tiempos a la letra correcta usando las palabras que Whisper sí reconoció como puntos de apoyo.
+    Devuelve (segmentos, proporción_de_palabras_reconocidas)."""
+    U = []
+    for i, line in enumerate(lines):
+        for tok in line.split():
+            n = norm_word(tok)
+            if n:
+                U.append({"w": tok, "n": n, "line": i, "start": None, "end": None})
+    A = [a for a in asr_words if norm_word(a["w"])]
+    if not U:
+        return [], 0.0
+    matched = 0
+    if A:
+        sm = difflib.SequenceMatcher(None, [u["n"] for u in U], [norm_word(a["w"]) for a in A], autojunk=False)
+        for blk in sm.get_matching_blocks():
+            for k in range(blk.size):
+                u, a = U[blk.a + k], A[blk.b + k]
+                u["start"], u["end"] = a["start"], a["end"]
+                matched += 1
+    ratio = matched / len(U)
+    anchors = [i for i, u in enumerate(U) if u["start"] is not None]
+    t_first = A[0]["start"] if A else 0.0
+    t_last = A[-1]["end"] if A else (duration or len(U) * 0.4)
+    if not anchors:                                      # sin puntos de apoyo: repartir parejo entre la primera y la última palabra oída
+        step = max((t_last - t_first) / len(U), 0.1)
+        for i, u in enumerate(U):
+            u["start"], u["end"] = t_first + i * step, t_first + (i + 1) * step
+    else:
+        def fill(i0, i1, t0, t1):                        # reparte U[i0:i1] entre t0 y t1
+            k = i1 - i0
+            if k <= 0:
+                return
+            slot = max((t1 - t0) / k, 0.05)
+            for j in range(k):
+                U[i0 + j]["start"] = t0 + j * slot
+                U[i0 + j]["end"] = t0 + (j + 1) * slot
+        first, last = anchors[0], anchors[-1]
+        fill(0, first, max(U[first]["start"] - 0.4 * first, 0.0), U[first]["start"])           # antes del primer apoyo
+        for x, y in zip(anchors, anchors[1:]):
+            fill(x + 1, y, U[x]["end"], U[y]["start"])                                            # entre apoyos
+        tail_end = U[last]["end"] + 0.4 * (len(U) - 1 - last)
+        if duration:
+            tail_end = min(tail_end, max(duration - 0.2, U[last]["end"] + 0.05 * (len(U) - 1 - last)))
+        fill(last + 1, len(U), U[last]["end"], tail_end)                                        # después del último apoyo
+    prev = 0.0
+    for u in U:                                          # tiempos que nunca retroceden
+        u["start"] = max(u["start"], prev)
+        u["end"] = max(u["end"], u["start"] + 0.05)
+        prev = u["start"]
+    segs = []
+    for i, line in enumerate(lines):
+        ws = [u for u in U if u["line"] == i]
+        if ws:
+            segs.append({"start": round(ws[0]["start"], 2), "end": round(ws[-1]["end"], 2), "text": line,
+                         "words": [{"w": u["w"], "start": round(u["start"], 2), "end": round(u["end"], 2)} for u in ws]})
+    return segs, ratio
+
+
+def guess_artist_title(title):
+    t = re.sub(r"[\(\[][^\)\]]*[\)\]]", " ", str(title))
+    t = re.sub(r"\b(official|video|oficial|lyrics?|letra|audio|videoclip|clip|hd|4k)\b", " ", t, flags=re.I)
+    parts = re.split(r"\s[-–—|]\s", t.strip(), maxsplit=1)
+    artist, track = (parts[0], parts[1]) if len(parts) == 2 else ("", parts[0])
+    return re.sub(r"\s+", " ", artist).strip(" -"), re.sub(r"\s+", " ", track).strip(" -")
+
+
+def http_json(url):
+    req = urllib.request.Request(url, headers={"User-Agent": "KaraokeParty/1.0 (uso personal)"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def fetch_lrclib(title, duration=0.0):
+    """Busca la letra en LRCLIB (gratis, sin clave). Devuelve el texto o None."""
+    base = os.environ.get("LRCLIB_BASE", "https://lrclib.net")
+    artist, track = guess_artist_title(title)
+    queries = []
+    if track:
+        queries.append({"track_name": track, **({"artist_name": artist} if artist else {})})
+    queries.append({"q": f"{artist} {track}".strip() or str(title)})
+    for q in queries:
+        try:
+            data = http_json(base + "/api/search?" + urllib.parse.urlencode(q))
+        except Exception:
+            continue
+        best, best_score = None, None
+        for c in data if isinstance(data, list) else []:
+            text = c.get("plainLyrics") or c.get("syncedLyrics")
+            if c.get("instrumental") or not text:
+                continue
+            dd = abs(float(c.get("duration") or 0) - duration) if duration and c.get("duration") else 0
+            if duration and dd > 25:
+                continue
+            sim = difflib.SequenceMatcher(None, norm_word(c.get("trackName", "")), norm_word(track or title)).ratio()
+            if sim < 0.6:
+                continue
+            score = (round(sim, 1), -dd)
+            if best_score is None or score > best_score:
+                best, best_score = text, score
+        if best:
+            return best
+    return None
+
+
+def choose_lyrics(folder, title, duration, asr_lyrics):
+    """Prioridad: letra pegada por ti > letra encontrada en LRCLIB > lo que escuchó Whisper."""
+    asr_words = [w for seg in asr_lyrics for w in seg.get("words", [])]
+    manual = folder / "lyrics.txt"
+    text, source = None, "whisper"
+    if manual.exists() and manual.read_text(encoding="utf-8", errors="replace").strip():
+        text, source = manual.read_text(encoding="utf-8", errors="replace"), "manual"
+    elif os.environ.get("LRCLIB", "1") != "0":
+        stage("searching_lyrics")
+        found = fetch_lrclib(title, duration)
+        if found:
+            text, source = found, "lrclib"
+    if text:
+        lines = clean_lyrics_text(text)
+        if lines:
+            segs, ratio = align_lyrics(lines, asr_words, duration)
+            if segs and (source == "manual" or ratio >= 0.35):     # la letra de internet solo se acepta si coincide con el audio
+                print(f"INFO lyrics={source} ratio={ratio:.2f}", flush=True)
+                return segs, source
+    print("INFO lyrics=whisper ratio=0.00", flush=True)
+    return asr_lyrics, "whisper"
 
 
 # ---------- Video con letra (ASS karaoke) ----------
@@ -145,6 +303,8 @@ def fake(folder, src, title):
         {"start": 0.5, "end": 3.0, "text": " ".join(words[:5]), "words": ws[:5]},
         {"start": 3.5, "end": 6.6, "text": " ".join(words[5:]), "words": ws[5:]},
     ]
+    (folder / "asr.json").write_text(json.dumps(lyrics, ensure_ascii=False))
+    lyrics, _ = choose_lyrics(folder, title, media_duration(folder / "instrumental.mp3"), lyrics)
     (folder / "lyrics.json").write_text(json.dumps(lyrics, ensure_ascii=False))
     stage("rendering"); make_video(folder, lyrics, title)
 
@@ -153,6 +313,20 @@ def main():
     folder = Path(sys.argv[1])
     lang = sys.argv[2] if len(sys.argv) > 2 else "auto"
     title = sys.argv[3] if len(sys.argv) > 3 else ""
+    mode = sys.argv[4] if len(sys.argv) > 4 else "full"
+
+    if mode == "lyrics":          # rehacer solo la letra y el video (sin volver a separar la voz ni a transcribir)
+        asr_file = folder / "asr.json" if (folder / "asr.json").exists() else folder / "lyrics.json"
+        asr = json.loads(asr_file.read_text(encoding="utf-8"))
+        if not (folder / "instrumental.mp3").exists():
+            raise RuntimeError("Falta la pista instrumental: procesa la canción completa otra vez")
+        if not (folder / "asr.json").exists():
+            (folder / "asr.json").write_text(json.dumps(asr, ensure_ascii=False))
+        lyrics, _ = choose_lyrics(folder, title, media_duration(folder / "instrumental.mp3"), asr)
+        (folder / "lyrics.json").write_text(json.dumps(lyrics, ensure_ascii=False))
+        stage("rendering"); make_video(folder, lyrics, title)
+        return stage("done")
+
     src = next(f for f in sorted(folder.glob("original.*")) if f.suffix.lower() != ".json")
 
     if os.environ.get("FAKE_PROCESS") == "1":
@@ -184,7 +358,9 @@ def main():
                          compute_type="float16" if gpu else "int8")
     segments, _ = model.transcribe(load_audio_16k(vocals_wav), language=None if lang == "auto" else lang,
                                    word_timestamps=True, vad_filter=True)
-    lyrics = build_lyrics(list(segments))
+    asr = build_lyrics(list(segments))
+    (folder / "asr.json").write_text(json.dumps(asr, ensure_ascii=False))          # lo que oyó Whisper (con tiempos)
+    lyrics, _ = choose_lyrics(folder, title, media_duration(folder / "instrumental.mp3"), asr)
     (folder / "lyrics.json").write_text(json.dumps(lyrics, ensure_ascii=False))
 
     # 3) Video con letra

@@ -24,3 +24,10 @@
 - Modo sin internet: guardar los videos de una carpeta en el teléfono (Cache Storage/IndexedDB) — ojo: Cast necesita la URL de Drive, no un blob.
 - Alternativa más privada que la carpeta pública: OAuth de Drive limitado a los correos de la familia.
 - Opción de pegar la letra correcta y alinearla en vez de transcribir.
+
+## Letras (añadido)
+- `pc/process.py`: `choose_lyrics` elige la letra: pegada por el usuario (`lyrics.txt`) > LRCLIB (solo si coincide >= 35 % con el audio) > Whisper. `align_lyrics` sincroniza el texto correcto con las palabras que Whisper sí reconoció (difflib) e interpola el resto. Guarda `asr.json` (lo que oyó Whisper) para rehacer solo la letra y el video (`modo lyrics`, sin Demucs ni Whisper).
+- `pc/server.js`: `POST /api/library/lyrics {lid, text}` (texto vacío = buscar en LRCLIB). UI: botón **Letra** en `/preparar`.
+- Windows: Smart App Control bloquea `.bat` y `.exe` sin firma; `yt-dlp` se llama como `python -m yt_dlp --js-runtimes node:...`. `faster-whisper` recibe el audio ya decodificado por ffmpeg (evita el error `av.open(metadata_errors)` con PyAV 19).
+- Drive: `files.list` de una carpeta NO pública responde 200 con lista vacía (no 404); el reproductor lo detecta con `files/{id}?fields=id`.
+- Pendiente: transmitir con la cola de Google Cast (Default Media Receiver) para conectar una vez y encolar canciones; hoy se usa "Transmitir pestaña" de Chrome.

@@ -177,17 +177,22 @@ function runNext() {
     if (!working) return;
     console.log(ok ? `>> Lista: ${s.title}\n` : `>> ERROR en "${s.title}": ${msg}\n`);
     working = false;
-    s.status = ok ? 'ready' : 'error'; s.stage = ''; s.error = ok ? '' : msg;
+    const redo = s.mode === 'lyrics';
+    s.mode = '';
+    const keep = !ok && redo && fs.existsSync(path.join(SONGS, lid, 'karaoke.mp4'));   // el video anterior sigue sirviendo
+    s.status = (ok || keep) ? 'ready' : 'error'; s.stage = ''; s.error = ok ? '' : (keep ? `No se pudo aplicar la letra: ${msg}` : msg);
     if (ok) publish(s);
     saveMeta(s); broadcast(); runNext();
   };
   const convert = () => {
     s.status = 'processing'; s.stage = 'starting'; broadcast();
     let errTail = '';
-    const child = spawn(PYTHON, [path.join(__dirname, 'process.py'), path.join(SONGS, lid), s.lang || 'auto', s.title || '']);
+    const child = spawn(PYTHON, [path.join(__dirname, 'process.py'), path.join(SONGS, lid), s.lang || 'auto', s.title || '', s.mode === 'lyrics' ? 'lyrics' : 'full']);
     child.stdout.on('data', d => {
       const m = String(d).match(/STAGE (\w+)/g);
       if (m) { s.stage = m[m.length - 1].slice(6); broadcast(); }
+      const infos = [...String(d).matchAll(/INFO lyrics=(\S+) ratio=([\d.]+)/g)];
+      if (infos.length) { const li = infos[infos.length - 1]; s.lyricsSource = li[1]; s.lyricsRatio = +li[2]; }
     });
     child.stderr.on('data', d => { process.stderr.write(d); errTail = (errTail + d).slice(-4000); });   // se muestra completo en la ventana
     child.on('error', e => finish(false, `No se pudo ejecutar ${PYTHON}: ${e.message}`));
@@ -350,6 +355,20 @@ const server = http.createServer(async (req, res) => {
     songs.forEach(x => queue.push({ qid: nextQid++, kind: 'local', lid: x.lid, title: x.title, thumb: '', singer }));
     broadcast();
     return json(res, 200, { added: songs.length });
+  }
+  // Aplica una letra correcta (texto pegado o .txt/.lrc/.srt); vacío = buscarla automáticamente en internet
+  if (req.method === 'POST' && p === '/api/library/lyrics') {
+    const b = await readBody(req);
+    const s = library.get(b.lid);
+    if (!s) return json(res, 404, { error: 'No encontrada' });
+    if (['processing', 'downloading', 'queued'].includes(s.status)) return json(res, 409, { error: 'Espera a que termine de procesarse' });
+    const dir = path.join(SONGS, s.lid);
+    if (!fs.existsSync(path.join(dir, 'instrumental.mp3')) || !(fs.existsSync(path.join(dir, 'asr.json')) || fs.existsSync(path.join(dir, 'lyrics.json'))))
+      return json(res, 400, { error: 'Esta canción no se procesó completa. Bórrala y agrégala de nuevo.' });
+    const text = String(b.text || '').trim();
+    if (text) fs.writeFileSync(path.join(dir, 'lyrics.txt'), text); else fs.rmSync(path.join(dir, 'lyrics.txt'), { force: true });
+    s.mode = 'lyrics'; s.status = 'queued'; s.error = ''; saveMeta(s); jobs.push(s.lid); broadcast(); runNext();
+    return json(res, 200, s);
   }
   if (req.method === 'POST' && p === '/api/library/delete') {
     const s = library.get((await readBody(req)).lid);
