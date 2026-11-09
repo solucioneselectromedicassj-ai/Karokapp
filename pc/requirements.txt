@@ -1,6 +1,6 @@
 demucs
 faster-whisper
-yt-dlp
+yt-dlp[default]
 # Demucs guarda audio con torchaudio; las versiones 2.9+ de torch/torchaudio lo rompen (piden torchcodec).
 torch<2.9
 torchaudio<2.9

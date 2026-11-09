@@ -102,9 +102,15 @@ function search(q) {
 const saveMeta = s => fs.writeFileSync(path.join(SONGS, s.lid, 'meta.json'), JSON.stringify(s));
 
 const FAKE = process.env.FAKE_PROCESS === '1';
+// yt-dlp se ejecuta como "python -m yt_dlp": en Windows, el Control Inteligente de Aplicaciones bloquea el
+// yt-dlp.exe sin firma que crea pip, pero no a Python. Si no funciona, se intenta el ejecutable "yt-dlp".
+// --js-runtimes: yt-dlp necesita un motor de JavaScript para YouTube; se usa el mismo Node que corre este servidor.
 function ytdlp(args, opts, cb) {
-  execFile('yt-dlp', args, opts, (err, so, se) => {
-    if (err && err.code === 'ENOENT') return execFile(PYTHON, ['-m', 'yt_dlp', ...args], opts, cb);
+  const full = ['--js-runtimes', 'node:' + process.execPath, ...args];
+  execFile(PYTHON, ['-m', 'yt_dlp', ...full], opts, (err, so, se) => {
+    const missing = err && (err.code === 'ENOENT' || /No module named yt_dlp/.test(String(se)));
+    const blocked = err && ['EACCES', 'EPERM', 'UNKNOWN'].includes(err.code);
+    if (missing || blocked) return execFile('yt-dlp', full, opts, cb);
     cb(err, so, se);
   });
 }
