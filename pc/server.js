@@ -155,6 +155,7 @@ function download(s) {
     ytdlp(['--no-playlist', '-x', '--audio-format', 'mp3', '--audio-quality', '0', '--write-info-json', '--no-warnings',
       '-o', path.join(dir, 'original.%(ext)s'), 'https://www.youtube.com/watch?v=' + s.yt],
       { timeout: 10 * 60 * 1000, maxBuffer: 10 * 1024 * 1024 }, (err, out, errOut) => {
+        if (err) console.error(`\n[descarga fallida: ${s.title}]\n${errOut || err.message}\n`);
         if (err) return reject(new Error(noYtdlp(err, errOut)
           ? 'yt-dlp no está instalado (pip install yt-dlp)' : lastLine(errOut) || err.message));
         const info = path.join(dir, 'original.info.json');
@@ -171,8 +172,10 @@ function runNext() {
   const s = lid && library.get(lid);
   if (!s) return;
   working = true;
+  console.log(`\n>> Procesando: ${s.title}`);
   const finish = (ok, msg) => {
     if (!working) return;
+    console.log(ok ? `>> Lista: ${s.title}\n` : `>> ERROR en "${s.title}": ${msg}\n`);
     working = false;
     s.status = ok ? 'ready' : 'error'; s.stage = ''; s.error = ok ? '' : msg;
     if (ok) publish(s);
@@ -186,7 +189,7 @@ function runNext() {
       const m = String(d).match(/STAGE (\w+)/g);
       if (m) { s.stage = m[m.length - 1].slice(6); broadcast(); }
     });
-    child.stderr.on('data', d => { errTail = (errTail + d).slice(-600); });
+    child.stderr.on('data', d => { process.stderr.write(d); errTail = (errTail + d).slice(-4000); });   // se muestra completo en la ventana
     child.on('error', e => finish(false, `No se pudo ejecutar ${PYTHON}: ${e.message}`));
     child.on('close', code => {
       const ok = code === 0 && fs.existsSync(path.join(SONGS, lid, 'karaoke.mp4'));
