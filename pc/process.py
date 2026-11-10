@@ -288,6 +288,31 @@ def load_audio_16k(path):
     return np.frombuffer(r.stdout, dtype=np.float32)
 
 
+def guide_level():
+    try:
+        return min(max(float(os.environ.get("GUIDE_LEVEL", "0.3")), 0.05), 1.0)
+    except ValueError:
+        return 0.3
+
+
+def make_guide(folder, level=None):
+    """karaoke_guia.mp4: el mismo video, pero con la voz original mezclada a bajo volumen (voz guía) para seguir la melodía.
+    No vuelve a dibujar el video (lo copia): tarda segundos."""
+    level = guide_level() if level is None else level
+    src, vocals = folder / "karaoke.mp4", folder / "vocals.mp3"
+    if not (src.exists() and vocals.exists()):
+        return False
+    audio = ["-c:a", "libopus"] if os.environ.get("FAKE_PROCESS") == "1" else ["-c:a", "aac", "-b:a", "192k"]
+    mix = f"[0:a][1:a]amix=inputs=2:weights=1 {level:.2f}:normalize=0:duration=first[a]"
+    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", "karaoke.mp4", "-i", "vocals.mp3", "-filter_complex", mix,
+           "-map", "0:v", "-map", "[a]", "-c:v", "copy", *audio, "-movflags", "+faststart", "karaoke_guia.mp4"]
+    r = subprocess.run(cmd, cwd=folder, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError("No se pudo crear la version con voz guia: " + (r.stderr.strip().splitlines() or [""])[-1])
+    print(f"INFO guide level={level:.2f}", flush=True)
+    return True
+
+
 def to_mp3(src, dst):
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-b:a", "192k", str(dst)], check=True)
 
@@ -306,7 +331,7 @@ def fake(folder, src, title):
     (folder / "asr.json").write_text(json.dumps(lyrics, ensure_ascii=False))
     lyrics, _ = choose_lyrics(folder, title, media_duration(folder / "instrumental.mp3"), lyrics)
     (folder / "lyrics.json").write_text(json.dumps(lyrics, ensure_ascii=False))
-    stage("rendering"); make_video(folder, lyrics, title)
+    stage("rendering"); make_video(folder, lyrics, title); make_guide(folder)
 
 
 def main():
@@ -314,6 +339,12 @@ def main():
     lang = sys.argv[2] if len(sys.argv) > 2 else "auto"
     title = sys.argv[3] if len(sys.argv) > 3 else ""
     mode = sys.argv[4] if len(sys.argv) > 4 else "full"
+
+    if mode == "guide":           # rehacer solo la versión con voz guía (por ejemplo, tras cambiar el volumen)
+        stage("rendering")
+        if not make_guide(folder):
+            raise RuntimeError("Falta el video o la voz separada de esta canción")
+        return stage("done")
 
     if mode == "lyrics":          # rehacer solo la letra y el video (sin volver a separar la voz ni a transcribir)
         asr_file = folder / "asr.json" if (folder / "asr.json").exists() else folder / "lyrics.json"
@@ -324,7 +355,7 @@ def main():
             (folder / "asr.json").write_text(json.dumps(asr, ensure_ascii=False))
         lyrics, _ = choose_lyrics(folder, title, media_duration(folder / "instrumental.mp3"), asr)
         (folder / "lyrics.json").write_text(json.dumps(lyrics, ensure_ascii=False))
-        stage("rendering"); make_video(folder, lyrics, title)
+        stage("rendering"); make_video(folder, lyrics, title); make_guide(folder)
         return stage("done")
 
     src = next(f for f in sorted(folder.glob("original.*")) if f.suffix.lower() != ".json")
@@ -366,6 +397,7 @@ def main():
     # 3) Video con letra
     stage("rendering")
     make_video(folder, lyrics, title)
+    make_guide(folder)
 
     shutil.rmtree(sep, ignore_errors=True)
     stage("done")

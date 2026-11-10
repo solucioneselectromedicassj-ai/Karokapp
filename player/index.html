@@ -24,6 +24,7 @@
   button.sec { background:var(--card); } button.ghost { background:transparent; border:1px solid var(--muted); color:var(--muted); padding:8px 12px; font-size:.85rem; }
   button.icon { background:var(--card); padding:10px 13px; font-size:1.05rem; }
   button:disabled { opacity:.55; }
+  button.sel { background:var(--pink); }
   .row { display:flex; gap:8px; align-items:center; } .row > * { flex:1; } .row > .fit { flex:none; }
   #stage { position:relative; background:#000; border-radius:14px; overflow:hidden; aspect-ratio:16/9; }
   #stage video { width:100%; height:100%; object-fit:contain; background:#000; display:none; }
@@ -80,6 +81,10 @@
     <div id="idle"><b>🎵 Elige una canción</b><span>Toca “Cantar” en cualquiera de la lista</span></div>
   </div>
   <div id="now"></div>
+  <div class="row" id="voiceRow" style="margin:0 0 8px">
+    <button class="sec sel" id="vOff">🎙️ Sin voz</button>
+    <button class="sec" id="vOn">🎤 Con voz guía</button>
+  </div>
   <div class="row">
     <button class="sec" id="nextBtn">⏭ Siguiente</button>
     <button class="sec" id="castBtn" style="display:none">📡 Transmitir a la TV</button>
@@ -158,6 +163,16 @@ async function listFolder(id) {
   } while (token);
   return files;
 }
+// "Título.mp4" = sin voz; "Título (con voz guia).mp4" = misma canción con la voz original a bajo volumen. Se muestran como UNA canción.
+const GUIDE_RE = /\s*\(con voz gu[ií]a\)\s*$/i;
+function buildSongs(files) {
+  const base = new Map(), guides = new Map();
+  for (const f of files.filter(isVideo)) {
+    const t = title(f.name);
+    if (GUIDE_RE.test(t)) guides.set(t.replace(GUIDE_RE, ''), f.id); else base.set(t, { id: f.id, title: t });
+  }
+  return [...base.values()].map(s => ({ ...s, gid: guides.get(s.title) || '' }));
+}
 const isVideo = f => /^video\//.test(f.mimeType) || /\.mp4$/i.test(f.name);
 const isFolder = f => f.mimeType === 'application/vnd.google-apps.folder';
 const title = n => n.replace(/\.(mp4|m4v|mov|webm)$/i, '');
@@ -170,8 +185,8 @@ async function loadLibrary(manual) {
   try {
     const root = await listFolder(cfg.folder);
     const subs = root.filter(isFolder);
-    const loose = root.filter(isVideo).map(f => ({ id: f.id, title: title(f.name) }));
-    const out = await Promise.all(subs.map(async d => ({ name: d.name, songs: (await listFolder(d.id)).filter(isVideo).map(f => ({ id: f.id, title: title(f.name) })) })));
+    const loose = buildSongs(root);
+    const out = await Promise.all(subs.map(async d => ({ name: d.name, songs: buildSongs(await listFolder(d.id)) })));
     const next = [...out.filter(f => f.songs.length), ...(loose.length ? [{ name: 'General', songs: loose }] : [])];
     if (!next.length && !(await folderReadable())) throw new Error(NOT_SHARED);
     lib = next;
@@ -205,7 +220,7 @@ let queue = ls.get('kp.queue', []), playing = null, qid = Date.now();
 const vid = $('vid'), who = $('who'); who.value = ls.get('kp.who', ''); who.oninput = () => ls.set('kp.who', who.value);
 function enqueue(songs) {
   const singer = who.value.trim() || 'Fiesta';
-  songs.forEach(s => queue.push({ qid: ++qid, id: s.id, title: s.title, singer }));
+  songs.forEach(s => queue.push({ qid: ++qid, id: s.id, gid: s.gid || '', title: s.title, singer }));
   saveQueue(); renderQueue(); if (playing == null) playNext();
   toast(songs.length > 1 ? `${songs.length} canciones añadidas` : 'Añadida a la fila');
 }
@@ -222,13 +237,34 @@ function playNext() {                                // reproduce la primera de 
   playing = cur.qid;
   $('stage').classList.add('playing');
   $('now').innerHTML = `🎤 <b>${esc(cur.singer)}</b> — ${esc(cur.title)}`;
-  vid.src = fileUrl(cur.id);
+  if (voice === 'guide' && !cur.gid) toast('Esta canción no tiene voz guía: suena sin voz');
+  vid.src = fileUrl(songFile(cur));
   vid.play().catch(() => toast('Toca ▶ para empezar'));
   setWake(true); renderQueue();
   if ('mediaSession' in navigator) { try { navigator.mediaSession.metadata = new MediaMetadata({ title: cur.title, artist: cur.singer, album: 'Karaoke Party', artwork: [{ src: '/icon-512.png', sizes: '512x512', type: 'image/png' }] }); } catch {} }
 }
 function advance() { queue.shift(); saveQueue(); playNext(); }
 vid.onended = advance;
+
+// Sin voz / Con voz guía: cambia el archivo (misma canción) y sigue desde el mismo segundo
+let voice = ls.get('kp.voice', 'off');
+const songFile = s => (voice === 'guide' && s.gid) ? s.gid : s.id;
+function paintVoice() { $('vOff').classList.toggle('sel', voice !== 'guide'); $('vOn').classList.toggle('sel', voice === 'guide'); }
+function setVoice(v) {
+  voice = v; ls.set('kp.voice', v); paintVoice();
+  const cur = queue[0];
+  if (playing == null || !cur) return;
+  if (v === 'guide' && !cur.gid) { toast('Esta canción todavía no tiene voz guía'); return; }
+  const t = vid.currentTime, wasPaused = vid.paused;
+  vid.src = fileUrl(songFile(cur));
+  vid.addEventListener('loadedmetadata', function f() {
+    vid.removeEventListener('loadedmetadata', f);
+    try { vid.currentTime = t; } catch {}
+    if (!wasPaused) vid.play().catch(() => {});
+  });
+}
+$('vOff').onclick = () => setVoice('off'); $('vOn').onclick = () => setVoice('guide');
+paintVoice();
 vid.onerror = () => { if (playing == null) return; toast('No pude reproducir esa canción. Pasando a la siguiente…'); setTimeout(advance, 1500); };
 $('nextBtn').onclick = () => { if (playing != null) advance(); };
 if ('mediaSession' in navigator) { try { navigator.mediaSession.setActionHandler('nexttrack', () => { if (playing != null) advance(); }); } catch {} }

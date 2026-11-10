@@ -55,6 +55,16 @@
 </div>
 <p class="hint">Usa canciones <b>originales con voz</b>: la app les quita la voz y escribe la letra. Tarda unos minutos por canción; puedes cerrar esta página y seguirá trabajando. Hazlo <b>antes</b> de la fiesta.</p>
 
+<h2>🎤 Voz guía</h2>
+<div class="box" style="margin-top:0">
+  <p class="hint" style="margin-top:0">Cada canción se guarda en <b>dos versiones</b>: <b>sin voz</b> y <b>con voz guía</b> (la voz original a bajo volumen, para que las niñas sigan la melodía). En la app del teléfono hay un botón para cambiar entre las dos.</p>
+  <div class="row"><select id="guideLevel">
+    <option value="15">Voz guía muy suave (15%)</option><option value="20">Suave (20%)</option><option value="30">Media (30%, recomendado)</option>
+    <option value="40">Clara (40%)</option><option value="50">Fuerte (50%)</option><option value="70">Muy fuerte (70%)</option></select>
+    <button id="saveGuide">Guardar</button></div>
+  <button id="guideAll" class="ghost" style="margin-top:8px;width:100%;padding:10px">Aplicar este volumen a todas las canciones ya listas</button>
+  <div class="msg" id="guideMsg">El volumen se usa en las canciones nuevas; para las que ya están listas, toca el botón de arriba (tarda unos segundos por canción).</div>
+</div>
 <p class="hint" id="libdir"></p>
 <h2 id="count">Biblioteca</h2>
 <p class="hint">Si la letra no coincide con la canción, toca <b>Letra</b> en esa canción: pega la letra correcta (o súbela como .txt, .lrc o .srt) y la app la sincroniza con el audio en segundos.</p>
@@ -141,6 +151,19 @@ es.onmessage = e => {
 };
 </script>
 <script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+// ----- Voz guía -----
+fetch('/api/settings').then(r => r.json()).then(c => { const o = [...$('guideLevel').options].find(x => +x.value === c.guideLevel); if (o) $('guideLevel').value = o.value; }).catch(() => {});
+$('saveGuide').onclick = async () => {
+  const r = await fetch('/api/settings', { method:'POST', body: JSON.stringify({ guideLevel: +$('guideLevel').value }) });
+  $('guideMsg').textContent = r.ok ? '✅ Guardado. Se usará en las canciones nuevas.' : '⚠️ ' + ((await r.json()).error || 'Error');
+};
+$('guideAll').onclick = async () => {
+  if (!confirm('¿Rehacer la versión con voz guía de todas las canciones listas con este volumen?')) return;
+  await $('saveGuide').onclick();
+  const d = await (await fetch('/api/library/guide-all', { method:'POST', body:'{}' })).json();
+  $('guideMsg').textContent = `✅ ${d.queued} canciones en cola. Verás el avance abajo; la app del teléfono las recibe con ⟳.`;
+};
+
 // ----- Letra correcta -----
 let lyLid = null;
 function openLyrics(lid, title) { lyLid = lid; $('lyTitle').textContent = title; $('lyText').value = ''; $('lyFile').value = ''; $('lyDlg').showModal(); }

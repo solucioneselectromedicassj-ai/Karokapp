@@ -31,3 +31,8 @@
 - Windows: Smart App Control bloquea `.bat` y `.exe` sin firma; `yt-dlp` se llama como `python -m yt_dlp --js-runtimes node:...`. `faster-whisper` recibe el audio ya decodificado por ffmpeg (evita el error `av.open(metadata_errors)` con PyAV 19).
 - Drive: `files.list` de una carpeta NO pública responde 200 con lista vacía (no 404); el reproductor lo detecta con `files/{id}?fields=id`.
 - Pendiente: transmitir con la cola de Google Cast (Default Media Receiver) para conectar una vez y encolar canciones; hoy se usa "Transmitir pestaña" de Chrome.
+
+## Voz guía (añadido)
+- `pc/process.py`: `make_guide` mezcla `karaoke.mp4` (instrumental) con `vocals.mp3` * nivel (`amix weights`, `normalize=0`) copiando el video (`-c:v copy`) -> `karaoke_guia.mp4`. Nivel por `GUIDE_LEVEL` (0.05-1.0). Modo `guide` = rehacer solo esa versión.
+- `pc/server.js`: ajustes en `pc/settings.json` (`GET/POST /api/settings`, `guideLevel` en %), `POST /api/library/guide-all`. `publish` copia ambas versiones: `Carpeta/Título.mp4` y `Carpeta/Título (con voz guia).mp4`; `unpublish` borra ambas.
+- `player/index.html`: `buildSongs` agrupa por nombre (sufijo `(con voz guia)`); botones Sin voz / Con voz guía (`kp.voice`), el cambio recarga el otro archivo en el mismo `currentTime`. Sin mezcla en vivo a propósito: dos elementos de audio se desfasan y Cast solo transmite el elemento de video.

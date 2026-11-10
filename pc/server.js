@@ -31,6 +31,10 @@ const PYTHON = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 
 const MAX_UPLOAD = 150 * 1024 * 1024;
 const AUDIO_EXT = new Set(['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.opus', '.mp4', '.webm']);
 fs.mkdirSync(SONGS, { recursive: true });
+// Ajustes guardados en pc/settings.json. guideLevel = volumen (%) de la voz guía en la versión "con voz guía".
+const SETTINGS_FILE = path.join(__dirname, 'settings.json');
+let settings = { guideLevel: 30 };
+try { Object.assign(settings, JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))); } catch {}
 fs.mkdirSync(LIBRARY_DIR, { recursive: true });
 
 let queue = [];                 // [{qid, kind:'yt'|'local', id|lid, title, thumb, singer}]
@@ -132,25 +136,40 @@ const safeName = t => String(t).replace(/[\\/:*?"<>|\u0000-\u001f]/g, ' ').repla
 
 // Copia karaoke.mp4 a LIBRARY_DIR/<carpeta>/<título>.mp4 (lo que lee la app del teléfono desde Drive)
 function unpublish(s) {
-  if (!s.published) return;
-  const f = path.resolve(LIBRARY_DIR, s.published);
-  if (f.startsWith(LIBRARY_DIR + path.sep)) {
-    fs.rmSync(f, { force: true });
-    try { fs.rmdirSync(path.dirname(f)); } catch {}      // quita la carpeta si quedó vacía
+  for (const key of ['published', 'publishedGuide']) {
+    if (!s[key]) continue;
+    const f = path.resolve(LIBRARY_DIR, s[key]);
+    if (f.startsWith(LIBRARY_DIR + path.sep)) {
+      fs.rmSync(f, { force: true });
+      try { fs.rmdirSync(path.dirname(f)); } catch {}      // quita la carpeta si quedó vacía
+    }
+    s[key] = '';
   }
-  s.published = '';
 }
-function publish(s) {
+// Copia karaoke.mp4 a LIBRARY_DIR/<carpeta>/<título>.mp4 y, si existe, karaoke_guia.mp4 como "<título> (con voz guia).mp4"
+// (la app del teléfono reconoce ese sufijo y ofrece el botón "Con voz guía"). onlyGuide: reemplaza solo la versión con voz guía.
+function publish(s, onlyGuide = false) {
   try {
+    const dir = path.join(LIBRARY_DIR, safeName(s.folder));
+    const guideSrc = path.join(SONGS, s.lid, 'karaoke_guia.mp4');
+    if (onlyGuide && s.published) {
+      const base = s.published.replace(/\.mp4$/i, '');
+      if (fs.existsSync(guideSrc)) { fs.copyFileSync(guideSrc, path.join(LIBRARY_DIR, base + ' (con voz guia).mp4')); s.publishedGuide = base + ' (con voz guia).mp4'; saveMeta(s); }
+      return;
+    }
     const src = path.join(SONGS, s.lid, 'karaoke.mp4');
     if (!fs.existsSync(src)) return;
     unpublish(s);
-    const dir = path.join(LIBRARY_DIR, safeName(s.folder));
     fs.mkdirSync(dir, { recursive: true });
-    let n = 1, dest;
-    do { dest = path.join(dir, safeName(s.title) + (n > 1 ? ` (${n})` : '') + '.mp4'); n++; } while (fs.existsSync(dest));
+    let n = 1, dest, base;
+    do { base = safeName(s.title) + (n > 1 ? ` (${n})` : ''); dest = path.join(dir, base + '.mp4'); n++; } while (fs.existsSync(dest));
     fs.copyFileSync(src, dest);
     s.published = path.relative(LIBRARY_DIR, dest);
+    if (fs.existsSync(guideSrc)) {
+      const g = path.join(dir, base + ' (con voz guia).mp4');
+      fs.copyFileSync(guideSrc, g);
+      s.publishedGuide = path.relative(LIBRARY_DIR, g);
+    }
     saveMeta(s);
   } catch (e) { console.error('No se pudo publicar en la biblioteca:', e.message); }
 }
@@ -190,17 +209,19 @@ function runNext() {
     if (!working) return;
     console.log(ok ? `>> Lista: ${s.title}\n` : `>> ERROR en "${s.title}": ${msg}\n`);
     working = false;
-    const redo = s.mode === 'lyrics';
+    const redo = s.mode === 'lyrics' || s.mode === 'guide';
+    const onlyGuide = s.mode === 'guide';
     s.mode = '';
     const keep = !ok && redo && fs.existsSync(path.join(SONGS, lid, 'karaoke.mp4'));   // el video anterior sigue sirviendo
-    s.status = (ok || keep) ? 'ready' : 'error'; s.stage = ''; s.error = ok ? '' : (keep ? `No se pudo aplicar la letra: ${msg}` : msg);
-    if (ok) publish(s);
+    s.status = (ok || keep) ? 'ready' : 'error'; s.stage = ''; s.error = ok ? '' : (keep ? `No se pudo aplicar el cambio: ${msg}` : msg);
+    if (ok) publish(s, onlyGuide);
     saveMeta(s); broadcast(); runNext();
   };
   const convert = () => {
     s.status = 'processing'; s.stage = 'starting'; broadcast();
     let errTail = '';
-    const child = spawn(PYTHON, [path.join(__dirname, 'process.py'), path.join(SONGS, lid), s.lang || 'auto', s.title || '', s.mode === 'lyrics' ? 'lyrics' : 'full']);
+    const child = spawn(PYTHON, [path.join(__dirname, 'process.py'), path.join(SONGS, lid), s.lang || 'auto', s.title || '', s.mode === 'lyrics' ? 'lyrics' : s.mode === 'guide' ? 'guide' : 'full'],
+      { env: { ...process.env, GUIDE_LEVEL: (Math.min(Math.max(+settings.guideLevel || 30, 5), 100) / 100).toFixed(2) } });
     child.stdout.on('data', d => {
       const m = String(d).match(/STAGE (\w+)/g);
       if (m) { s.stage = m[m.length - 1].slice(6); broadcast(); }
@@ -368,6 +389,27 @@ const server = http.createServer(async (req, res) => {
     songs.forEach(x => queue.push({ qid: nextQid++, kind: 'local', lid: x.lid, title: x.title, thumb: '', singer }));
     broadcast();
     return json(res, 200, { added: songs.length });
+  }
+  if (p === '/api/settings' && req.method === 'GET') return json(res, 200, settings);
+  if (p === '/api/settings' && req.method === 'POST') {
+    const b = await readBody(req);
+    const lv = Math.round(+b.guideLevel);
+    if (!(lv >= 5 && lv <= 100)) return json(res, 400, { error: 'El volumen debe estar entre 5 y 100' });
+    settings.guideLevel = lv;
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings));
+    return json(res, 200, settings);
+  }
+  // Rehace la versión con voz guía de todas las canciones listas (tarda segundos por canción)
+  if (req.method === 'POST' && p === '/api/library/guide-all') {
+    let n = 0;
+    for (const s of library.values()) {
+      const dir = path.join(SONGS, s.lid);
+      if (s.status === 'ready' && fs.existsSync(path.join(dir, 'karaoke.mp4')) && fs.existsSync(path.join(dir, 'vocals.mp3'))) {
+        s.mode = 'guide'; s.status = 'queued'; s.error = ''; saveMeta(s); jobs.push(s.lid); n++;
+      }
+    }
+    broadcast(); runNext();
+    return json(res, 200, { queued: n });
   }
   // Aplica una letra correcta (texto pegado o .txt/.lrc/.srt); vacío = buscarla automáticamente en internet
   if (req.method === 'POST' && p === '/api/library/lyrics') {

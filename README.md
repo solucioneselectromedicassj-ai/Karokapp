@@ -62,6 +62,12 @@ Doble clic en **Karaoke** del escritorio: arranca el servidor, encuentra solo tu
 
 **Velocidad.** Sin placa de video NVIDIA, cada canción tarda unos 25 minutos (la mayor parte es quitar la voz). Si la letra viene de internet o la pegas tú, Whisper solo aporta los tiempos y alcanza con el modelo liviano: ejecuta una vez `setx WHISPER_MODEL base` en la terminal y reinicia el programa para acortar la parte de la letra. Lo más práctico: dejar varias canciones en cola y que trabaje mientras no se usa la PC.
 
+## Voz guía (sin voz / con voz)
+Cada canción se guarda en **dos versiones**: `Título.mp4` (sin voz) y `Título (con voz guia).mp4` (la voz original a bajo volumen, para que las niñas sigan la melodía). En la app del teléfono aparecen como **una sola canción** y los botones **🎙️ Sin voz / 🎤 Con voz guía**, bajo el video, cambian de versión en cualquier momento, sin perder el segundo en que va (la elección se recuerda).
+- **Volumen de la voz guía:** en `http://localhost:3000/preparar`, sección **Voz guía** (15 % a 70 %, recomendado 30 %). Se aplica a las canciones nuevas.
+- **Canciones que ya estaban listas:** en esa misma sección, **"Aplicar este volumen a todas las canciones ya listas"**. Tarda segundos por canción (no vuelve a quitar la voz ni a dibujar el video) y la app del teléfono las recibe con ⟳.
+- Cuesta espacio: cada versión pesa unos 5-8 MB.
+
 ## Letras correctas
 La letra que escribe Whisper "al oído" puede tener errores. Hay tres formas de mejorarla (en `http://localhost:3000/preparar`, botón **Letra** de cada canción):
 1. **Automática:** al preparar cada canción, la app busca la letra en LRCLIB (gratis, sin clave). Solo la usa si coincide con el audio; si no, queda la de Whisper.
