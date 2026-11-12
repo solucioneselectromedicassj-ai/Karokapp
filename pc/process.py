@@ -12,6 +12,21 @@ import urllib.parse, urllib.request
 from pathlib import Path
 
 
+def read_text_any(path):
+    """Lee un texto guardado en UTF-8 o en la codificación de Windows (cp1252), que usaban las versiones anteriores."""
+    data = Path(path).read_bytes()
+    for enc in ("utf-8-sig", "cp1252"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
+
+
+def write_json(path, obj):
+    Path(path).write_text(json.dumps(obj, ensure_ascii=False), encoding="utf-8")      # siempre UTF-8 (en Windows el valor por defecto no lo es)
+
+
 def stage(name):
     print("STAGE " + name, flush=True)
 
@@ -170,8 +185,8 @@ def choose_lyrics(folder, title, duration, asr_lyrics):
     asr_words = [w for seg in asr_lyrics for w in seg.get("words", [])]
     manual = folder / "lyrics.txt"
     text, source = None, "whisper"
-    if manual.exists() and manual.read_text(encoding="utf-8", errors="replace").strip():
-        text, source = manual.read_text(encoding="utf-8", errors="replace"), "manual"
+    if manual.exists() and read_text_any(manual).strip():
+        text, source = read_text_any(manual), "manual"
     elif os.environ.get("LRCLIB", "1") != "0":
         stage("searching_lyrics")
         found = fetch_lrclib(title, duration)
@@ -253,7 +268,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 def media_duration(path):
     r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
     try:
         return float(r.stdout.strip())
     except ValueError:
@@ -271,7 +286,7 @@ def make_video(folder, lyrics, title):
                  "-c:a", "aac", "-b:a", "192k"]
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=0x2a1450:s=1280x720:r=15",
            "-i", "instrumental.mp3", "-vf", "ass=karaoke.ass", *codec, "-shortest", "-movflags", "+faststart", "karaoke.mp4"]
-    r = subprocess.run(cmd, cwd=folder, capture_output=True, text=True)   # cwd: evita problemas de rutas en el filtro
+    r = subprocess.run(cmd, cwd=folder, capture_output=True, text=True, encoding="utf-8", errors="replace")   # cwd: evita problemas de rutas en el filtro
     if r.returncode != 0:
         raise RuntimeError("No se pudo crear el video (¿ffmpeg sin soporte de subtítulos/libass?): " + (r.stderr.strip().splitlines() or [""])[-1])
     (folder / "karaoke.ass").unlink(missing_ok=True)
@@ -306,7 +321,7 @@ def make_guide(folder, level=None):
     mix = f"[0:a][1:a]amix=inputs=2:weights=1 {level:.2f}:normalize=0:duration=first[a]"
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", "karaoke.mp4", "-i", "vocals.mp3", "-filter_complex", mix,
            "-map", "0:v", "-map", "[a]", "-c:v", "copy", *audio, "-movflags", "+faststart", "karaoke_guia.mp4"]
-    r = subprocess.run(cmd, cwd=folder, capture_output=True, text=True)
+    r = subprocess.run(cmd, cwd=folder, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if r.returncode != 0:
         raise RuntimeError("No se pudo crear la version con voz guia: " + (r.stderr.strip().splitlines() or [""])[-1])
     print(f"INFO guide level={level:.2f}", flush=True)
@@ -328,9 +343,9 @@ def fake(folder, src, title):
         {"start": 0.5, "end": 3.0, "text": " ".join(words[:5]), "words": ws[:5]},
         {"start": 3.5, "end": 6.6, "text": " ".join(words[5:]), "words": ws[5:]},
     ]
-    (folder / "asr.json").write_text(json.dumps(lyrics, ensure_ascii=False))
+    write_json(folder / "asr.json", lyrics)
     lyrics, _ = choose_lyrics(folder, title, media_duration(folder / "instrumental.mp3"), lyrics)
-    (folder / "lyrics.json").write_text(json.dumps(lyrics, ensure_ascii=False))
+    write_json(folder / "lyrics.json", lyrics)
     stage("rendering"); make_video(folder, lyrics, title); make_guide(folder)
 
 
@@ -348,13 +363,12 @@ def main():
 
     if mode == "lyrics":          # rehacer solo la letra y el video (sin volver a separar la voz ni a transcribir)
         asr_file = folder / "asr.json" if (folder / "asr.json").exists() else folder / "lyrics.json"
-        asr = json.loads(asr_file.read_text(encoding="utf-8"))
+        asr = json.loads(read_text_any(asr_file))
         if not (folder / "instrumental.mp3").exists():
             raise RuntimeError("Falta la pista instrumental: procesa la canción completa otra vez")
-        if not (folder / "asr.json").exists():
-            (folder / "asr.json").write_text(json.dumps(asr, ensure_ascii=False))
+        write_json(folder / "asr.json", asr)          # normaliza a UTF-8 (las versiones anteriores lo guardaban en cp1252 en Windows)
         lyrics, _ = choose_lyrics(folder, title, media_duration(folder / "instrumental.mp3"), asr)
-        (folder / "lyrics.json").write_text(json.dumps(lyrics, ensure_ascii=False))
+        write_json(folder / "lyrics.json", lyrics)
         stage("rendering"); make_video(folder, lyrics, title); make_guide(folder)
         return stage("done")
 
@@ -390,9 +404,9 @@ def main():
     segments, _ = model.transcribe(load_audio_16k(vocals_wav), language=None if lang == "auto" else lang,
                                    word_timestamps=True, vad_filter=True)
     asr = build_lyrics(list(segments))
-    (folder / "asr.json").write_text(json.dumps(asr, ensure_ascii=False))          # lo que oyó Whisper (con tiempos)
+    write_json(folder / "asr.json", asr)          # lo que oyó Whisper (con tiempos)
     lyrics, _ = choose_lyrics(folder, title, media_duration(folder / "instrumental.mp3"), asr)
-    (folder / "lyrics.json").write_text(json.dumps(lyrics, ensure_ascii=False))
+    write_json(folder / "lyrics.json", lyrics)
 
     # 3) Video con letra
     stage("rendering")
